@@ -94,14 +94,82 @@ echo -e "Memory: "$mem"G" | tee -a "${logs}"/log.txt
 #software version
 echo -e "\nphage_diversity.sh version 0.1.0\n" | tee -a "${logs}"/log.txt  # $0
 
-kraken -v | grep "Kraken" | tee -a "${logs}"/log.txt
-fastqc -v | tee -a "${logs}"/log.txt
-java -version 2>&1 1>/dev/null | grep "java version" | tee -a "${logs}"/log.txt
-bbduk.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
-bbmerge.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
-spades.py -v | tee -a "${logs}"/log.txt
-quast.py -v | tee -a "${logs}"/log.txt
-cd-hit-est -h | head -n 1 | tr -d "=" | sed 's/^[ \t]*//;s/[ \t]*$//' | tee -a "${logs}"/log.txt
+# kraken -v | grep "Kraken" | tee -a "${logs}"/log.txt
+# java -version 2>&1 1>/dev/null | grep "java version" | tee -a "${logs}"/log.txt
+# fastqc -v | tee -a "${logs}"/log.txt
+# bbduk.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
+# bbmerge.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
+# spades.py -v | tee -a "${logs}"/log.txt
+# quast.py -v | tee -a "${logs}"/log.txt
+# cd-hit-est -h | head -n 1 | tr -d "=" | sed 's/^[ \t]*//;s/[ \t]*$//' | tee -a "${logs}"/log.txt
+
+
+#check if depenencies are installed
+#if so, log version
+
+#Kraken
+if hash kraken 2>/dev/null; then  # if installed
+    kraken -v | grep "Kraken" | tee -a "${logs}"/log.txt
+else
+    echo >&2 "kraken was not found. Aborting."
+    exit 1
+fi
+
+#java
+if hash java 2>/dev/null; then 
+    java -version 2>&1 1>/dev/null | grep "java version" | tr -d '"' | tee -a "${logs}"/log.txt
+else
+    echo >&2 "java was not found. Aborting."
+    exit 1
+fi
+
+#FastQC
+if hash fastqc 2>/dev/null; then 
+    fastqc -v | tee -a "${logs}"/log.txt
+else
+    echo >&2 "fastQC was not found. Aborting."
+    exit 1
+fi
+
+#BBDuk
+if hash bbduk.sh 2>/dev/null; then 
+    bbduk.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
+else
+    echo >&2 "bbduk.sh was not found. Aborting."
+    exit 1
+fi
+
+#BBmap
+if hash bbmerge.sh 2>/dev/null; then 
+    bbmerge.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
+else
+    echo >&2 "bbmerge.sh was not found. Aborting."
+    exit 1
+fi
+
+#SPAdes
+if hash spades.py 2>/dev/null; then
+    spades.py -v | tee -a "${logs}"/log.txt
+else
+    echo >&2 "spades.py was not found. Aborting."
+    exit 1
+fi
+
+#QUAST
+if hash spades.py 2>/dev/null; then
+    quast.py -v | tee -a "${logs}"/log.txt
+else
+    echo >&2 "quast.py was not found. Aborting."
+    exit 1
+fi
+
+#CD-HIT-EST
+if hash cd-hit-est 2>/dev/null; then
+    cd-hit-est -h | head -n 1 | tr -d "=" | sed 's/^[ \t]*//;s/[ \t]*$//' | tee -a "${logs}"/log.txt
+else
+    echo >&2 "cd-hit-est was not found. Aborting."
+    exit 1
+fi
 
 
 ########################
