@@ -3,22 +3,49 @@
 use strict;
 use warnings;
 use diagnostics;
-# use Data::Dumper;  # debug
-
+use Getopt::Long;
+use Pod::Usage;
+use Data::Dumper;  # debug
 
 #I\O files
-my $input_sampleList = $ARGV[0];  # a text files with all samples listed. One sample per line.
-my $input_clstr = $ARGV[1];  # Output ".clstr" file from CD-HIT-EST
-my $output_table = $ARGV[2];  # Tab-separated output table
+my $input_sampleList;  # a text files with all samples listed. One sample per line.
+my $input_clstr;  # Output ".clstr" file from CD-HIT-EST
+my $output_table;  # Tab-separated output table
+my $help;
+my $man;
+
+GetOptions(
+    'sample_list|s=s' => \$input_sampleList,
+    'input_clstr|i=s' => \$input_clstr,
+    'output_table|o=s' => \$output_table,
+    'help|h' => \$help,
+    'man' => \$man) or pod2usage(2);
+
+pod2usage(1) if $help;
+pod2usage(-exitval => 0, -verbose => 2) if $man;
 
 
-
-# Test if all required arguments are present
-if (scalar(@ARGV) != 3)
+#check if arguments are not empty
+if (!defined($input_sampleList) || !defined($input_clstr) || !defined($output_table))
 {
-    print "Usage: perl cdHitClstr2table.pl <sampleList.txt> <cd-hit.clstr> <outputTable.tsv>\n";
-    exit;
+    print ("Not all required arguments supplied.\nUsage: perl cdHitClstr2table.pl -s sampleList -c cd-hit.clstr -o outputTable.tsv\n");
+    exit 1;
+#    die "Usage: perl cdHitClstr2table.pl -s sampleList -c cd-hit.clstr -o outputTable.tsv";
 }
+
+
+##I\O files
+#my $input_sampleList = $ARGV[0];  # a text files with all samples listed. One sample per line.
+#my $input_clstr = $ARGV[1];  # Output ".clstr" file from CD-HIT-EST
+#my $output_table = $ARGV[2];  # Tab-separated output table
+#
+## Test if all required arguments are present
+#if (scalar(@ARGV) != 3)
+#{
+#    print "Usage: perl cdHitClstr2table.pl <sampleList.txt> <cd-hit.clstr> <outputTable.tsv>\n";
+#    exit;
+#}
+
 
 ##############################
 #                            #
@@ -64,8 +91,8 @@ while (my $line = <$input_clstr_fh>)
     next if $line eq "";  # skip empty lines
 
     # >Cluster 0
-    # 0	78657nt, >2016-SEQ-0017_2... *
-    # 1	78657nt, >2016-SEQ-0013_2... at +/100.00%
+    # 0 78657nt, >2016-SEQ-0017_2... *
+    # 1 78657nt, >2016-SEQ-0013_2... at +/100.00%
 
     if ($line =~ /^>Cluster/)
     {
@@ -135,6 +162,45 @@ foreach my $cluster (sort(keys(%clusters)))
 
 close($output_table_fh);
 
+__END__
+=head1 NAME
 
+cdHitClstr2table.pl - Convert CD-HIT-EST ".clstr" output file for QIIME.
 
+=head1 SYNOPSIS
+perl cdHitClstr2table.pl -s sampleList -c cd-hit.clstr -o outputTable.tsv
 
+ Options:
+   --help [-h]              Print this help
+   --sample_list [-s]       List of samples. A text file with one sample per line
+   --input_clstr [-i]       CD-HIT-EST ".clstr" output file
+   --output_table [-o]      QIIME-ready output table
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--help [-h]>
+
+Print this help
+
+=item B<--sample_list [-s]>
+
+List of samples. A text file with one sample per line
+
+=item B<--input_clstr [-i]>
+
+CD-HIT-EST ".clstr" output file
+
+=item B<--output_table [-o]>
+
+QIIME-ready output table
+
+=back
+
+=head1 DESCRIPTION
+
+B<cdHitClstr2table.pl> will convert the output from CD-HIT-EST to a table ready to input on QIIME.
+A sample list is also required as input to have a complete output table.
+
+=cut

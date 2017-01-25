@@ -787,11 +787,11 @@ sampleList=($(ls "${phaster}"/*_phages.fasta | sed -e 's/_phages.fasta//' -e "s%
 echo "${sampleList[@]}" | tr " " "\n" >> "${phaster}"/sampleList.txt
 
 #Convert CD-HIT-EST ".clstr" output file to OTU table
-# Usage: perl cdHitClstr2table.pl <sampleList.txt> <cd-hit.clstr> <outputTable.tsv>
+# Usage: perl cdHitClstr2table.pl -s sampleList -c cd-hit.clstr -o outputTable.tsv
 perl "${scripts}"/cdHitClstr2table.pl \
-    "${phaster}"/sampleList.txt \
-    "${phaster}"/phages_clustered.fasta.clstr \
-    "${phaster}"/phages_clustered.tsv
+    -s "${phaster}"/sampleList.txt \
+    -c "${phaster}"/phages_clustered.fasta.clstr \
+    -o "${phaster}"/phages_clustered.tsv
 
 
 
