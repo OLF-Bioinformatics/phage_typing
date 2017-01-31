@@ -16,7 +16,6 @@ reads="/media/3tb_hdd/data/salmonella_panel"
 
 #program location
 export prog=""${HOME}"/prog"
-export scripts=""${HOME}"/scripts"
 
 #Kraken DB
 export db="/media/3tb_hdd/db/kraken/refseq_BV_old"
@@ -526,7 +525,7 @@ export -f assemble  # -f is to export functions
 
 #run assembly on multiple samples in parallel
 find "$merged" -type f -name "*_merged.fastq.gz" \
-    | parallel --bar --env maxProc --env assemble --env assembly --env mem --env kmer --env cpu --env scripts --jobs "$maxProc" 'assemble {}'
+    | parallel --bar --env maxProc --env assemble --env assembly --env mem --env kmer --env cpu --jobs "$maxProc" 'assemble {}'
 
 #Elapsed time
 end=$(date +%s)
@@ -579,13 +578,13 @@ function assemblyTrimm()
     # http://phaster.ca/instructions
     if [ $(cat "$1" | grep -Ec "^>") -gt 1 ]; then  # if more than one contig
         #remove contigs smaller than 2000 bp from assembly
-        perl "${scripts}"/removesmallscontigs.pl \
+        perl "${prog}"/phage_typing/removesmallscontigs.pl \
             2000 \
             "$1" \
             > "${1}".tmp
     elif [ $(cat "$1" | grep -Ec "^>") -eq 1 ]; then  # if only one contig
         #remove contigs smaller than 2000 bp from assembly
-        perl "${scripts}"/removesmallscontigs.pl \
+        perl "${prog}"/phage_typing/removesmallscontigs.pl \
             1500 \
             "$1" \
             > "${1}".tmp
@@ -603,7 +602,7 @@ export -f assemblyTrimm  # -f is to export functions
 
 #run trimming on multiple assemblies in parallel
 find "$assembly" -type f -name "*_assembly.fasta" \
-    | parallel --env assemblyTrimm --env scripts 'assemblyTrimm {}'
+    | parallel --env assemblyTrimm --env prog 'assemblyTrimm {}'
 
 
 ###############
@@ -655,7 +654,7 @@ function phasterResults()
     # echo "PHASTER analysis of "$sample" is "$status""
     while [ "$status" != "Complete" ]; do
         #check status every 2 minutes
-        echo "Job is "$status". Checking status back in 2 minutes." 
+        echo "Job status of "$sample" is "$status". Checking status back in 2 minutes." 
         sleep 2m  # sleep 2 minutes
 
         #get status
@@ -666,7 +665,7 @@ function phasterResults()
     done
 
     echo "PHASTER analysis of "$sample" is "$status""
-}
+
     #get the PHASTER output file
     phasterZip=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 4 | cut -d ":" -f 2 | tr -d '"')
     wget "$phasterZip" -O "${phaster}"/"${sample}"_phaster.zip
@@ -788,9 +787,9 @@ echo "${sampleList[@]}" | tr " " "\n" >> "${phaster}"/sampleList.txt
 
 #Convert CD-HIT-EST ".clstr" output file to OTU table
 # Usage: perl cdHitClstr2table.pl -s sampleList -c cd-hit.clstr -o outputTable.tsv
-perl "${scripts}"/cdHitClstr2table.pl \
+perl "${prog}"/phage_typing/cdHitClstr2table.pl \
     -s "${phaster}"/sampleList.txt \
-    -c "${phaster}"/phages_clustered.fasta.clstr \
+    -i "${phaster}"/phages_clustered.fasta.clstr \
     -o "${phaster}"/phages_clustered.tsv
 
 
