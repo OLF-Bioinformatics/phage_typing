@@ -22,7 +22,7 @@ export db="/media/3tb_hdd/db/kraken/refseq_BV_old"
 
 #Maximum number of cores used per sample for parallel processing
 #A highier value reduces the memory footprint.
-export maxProc=4
+export maxProc=12
 
 #k-mer size for SPAdes assembler (must be odd number(s))
 #Should be smaller that minimum trimmed read length
@@ -92,18 +92,8 @@ echo -e "User: $(whoami)" | tee -a "${logs}"/log.txt
 echo -e "Processors: "$cpu"" | tee -a "${logs}"/log.txt
 echo -e "Memory: "$mem"G" | tee -a "${logs}"/log.txt
 
-#software version
+#pipeline version
 echo -e "\nphage_diversity.sh version 0.1.0\n" | tee -a "${logs}"/log.txt  # $0
-
-# kraken -v | grep "Kraken" | tee -a "${logs}"/log.txt
-# java -version 2>&1 1>/dev/null | grep "java version" | tee -a "${logs}"/log.txt
-# fastqc -v | tee -a "${logs}"/log.txt
-# bbduk.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
-# bbmerge.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
-# spades.py -v | tee -a "${logs}"/log.txt
-# quast.py -v | tee -a "${logs}"/log.txt
-# cd-hit-est -h | head -n 1 | tr -d "=" | sed 's/^[ \t]*//;s/[ \t]*$//' | tee -a "${logs}"/log.txt
-
 
 #check if depenencies are installed
 #if so, log version
@@ -184,139 +174,20 @@ fi
 find -L "$reads" -type f -name "*.fastq.gz" \
     | parallel --bar "ln -s {} "${fastq}"/{/}"  # {/} means basename in parallel -> https://www.gnu.org/software/parallel/man.html
 
-# for b in $(find "$reads" -type f -name "*.fastq.gz") #look in folder recursively.
-# do
-#   name=$(basename "$b") 
-#   ln -s "$b" "${fastq}"/"$name"
-# done
+
+########################################
+#                                      #
+#     Trimming/Merging/Assembling      #
+#                                      #
+########################################
 
 
-####################
-#                  #
-#   FastQc - Raw   #
-#                  #
-####################
-
-
-[ -e  "${qc}"/fastqc/list.txt ] && rm  "${qc}"/fastqc/list.txt
-for i in $(find -L "$fastq" -type f -name "*.fastq.gz"); do 
-    echo "$i" >> "${qc}"/fastqc/list.txt
-done
-
-ARRAY=($( cat  "${qc}"/fastqc/list.txt ))
-list=$(echo "${ARRAY[@]}")
-
-[ -d  "${qc}"/fastqc/raw ] || mkdir -p  "${qc}"/fastqc/raw
-
-fastqc \
-    --o  "${qc}"/fastqc/raw \
-    --noextract \
-    --threads "$cpu" \
-    $list  # don't put in quotes
-
-
-####################
-#                  #
-#   Kraken - Raw   #
-#                  #
-####################
-
-
-#put kraken db into memory
-cat "${db}"/database.kdb > /dev/null  # About 6min to run
-
-
-# Can't run Kraken with parallel because it's using the database stored into memory
-
-# function krack()
-# {
-#     r1="$1"
-#     r2=$(echo "$r1" | sed 's/_R1/_R2/')
-#     name=$(basename "$r1") #discard the path
-#     sample=$(cut <<< "${name}" -d '_' -f 1) #only keep the first part of the file name, before the first "_"
-
-#     #Output folder
-#     out=""${krakenOut}"/"${sample}""
-#     [ -d "$out" ] || mkdir -p "$out"
-
-#     kraken --db "$db" \
-#         --output "${out}"/"${sample}".kraken \
-#         --threads $((cpu/maxProc)) \
-#         --gzip-compressed \
-#         --check-names \
-#         --fastq-input \
-#         --paired "$r1" "$r2" \
-#         &> >(tee "${out}"/"${sample}".kraken.log)
-
-#     #Prepare result for display with Krona
-#     cat "${out}"/"${sample}".kraken \
-#         | cut -f 2-3 \
-#         | ktImportTaxonomy /dev/stdin -o "${out}"/"${sample}".html
-# }
-
-
-# #make function available to parallel
-# export -f krack  # -f is to export functions
-
-# #Run Kraken in parallel
-# find -L "$fastq" -type f -name "*.fastq.gz" -name "*_R1*" \
-#     | parallel --env db --env maxProc --env krack --env krakenOut --jobs "$maxProc" "krack {}"
-
-
-start=$(date +%s)
-
-#Find fastq reads and get sample
-for k in $(find -L "$fastq" -type f -name "*_R1*" -name "*.fastq.gz"); do #find forward (R1) read files recursively
-    r1="$k"
-    r2=$(echo "$r1" | sed 's/_R1/_R2/')
-    sample=$(basename "$r1" | cut -d '_' -f 1)  #discard the path and only keep the first part of the file name, before the first "_"
-
-    #Output folder
-    out=""${krakenOut}"/"${sample}""
-    [ -d "$out" ] || mkdir -p "$out"
-
-    #run Kraken
-    kraken --db "$db" \
-        --output "${out}"/"${sample}".kraken \
-        --threads "$cpu" \
-        --gzip-compressed \
-        --check-names \
-        --fastq-input \
-        --paired "$r1" "$r2" \
-        &> >(tee "${out}"/"${sample}".kraken.log)
-
-    #Prepare result for display with Krona
-    cat "${out}"/"${sample}".kraken \
-        | cut -f 2-3 \
-        | ktImportTaxonomy /dev/stdin -o "${out}"/"${sample}".html
-
-    #visualize the resutls in Firefow browser
-    # firefox file://"${out}"/"${sample}".html &
-done
-
-#Elapsed time
-end=$(date +%s)
-elapsed=$(($end - $start))
-printf "Kraken analysis finished in %dh:%dm:%ds\n" \
-    $(($elapsed/3600)) $(($elapsed%3600/60)) $(($elapsed%60)) | tee -a "${logs}"/log.txt
-
-
-#####################
-#                   #
-#     Trimming      #
-#                   #
-#####################
-
-
-start=$(date +%s)
-
-function trimm()
+function TrimMergeAssemble()
 {
-    #sequence nomenclature:
-    # 2014-SEQ-0729_S5_L001_R1_001.fastq.gz
+    #trim
     r1="$1"
-    r2=$(echo "$r1" | sed 's/_R1/_R2/')
-    sample=$(basename "$r1" | cut -d '_' -f 1)
+    r2=$(echo "$r1" | sed 's/_R1/_R2/')   # 2014-SEQ-0729_S5_L001_R1_001.fastq.gz
+    sample=$(basename "$r1" | cut -d '_' -f 1) 
 
     bbduk.sh "$memJava" \
         threads=$((cpu/maxProc)) \
@@ -331,150 +202,28 @@ function trimm()
         pigz=t \
         unpigz=t \
         2> >(tee "${logs}"/trimming/"${sample}".txt)
-}
-
-#make function available to parallel
-export -f trimm  # -f is to export functions
-
-#Create report output directory
-[ -d "${logs}"/trimming ] || mkdir -p "${logs}"/trimming
-
-#run trimming on multiple samples in parallel
-find -L "$fastq" -type f -name "*.fastq.gz" -name "*_R1*" \
-    | parallel --env trimm --env cpu --env maxProc --env memJava --env prog --env trimmed --env logs --jobs "$maxProc" "trimm {}"
-
-#Elapsed time
-end=$(date +%s)
-elapsed=$(($end - $start))
-printf "Trimming finished in %dh:%dm:%ds\n" \
-    $(($elapsed/3600)) $(($elapsed%3600/60)) $(($elapsed%60)) | tee -a "${logs}"/log.txt
 
 
-########################
-#                      #
-#   FastQc - Trimmed   #
-#                      #
-########################
-
-
-[ -e "${qc}"/list.txt ] && rm "${qc}"/fastqc/list.txt
-for i in $(find "$trimmed" -type f -name "*.fastq.gz"); do 
-    echo "$i" >> "${qc}"/fastqc/list.txt
-done
-
-ARRAY=($( cat "${qc}"/fastqc/list.txt ))
-list=$(echo "${ARRAY[@]}")
-
-[ -d "${qc}"/fastqc/trimmed ] || mkdir -p "${qc}"/fastqc/trimmed
-
-fastqc \
-    --o "${qc}"/fastqc/trimmed \
-    --noextract \
-    --threads "$cpu" \
-    $list  # don't put in quotes
-
-
-####################
-#                  #
-#     Merging      #
-#                  #
-####################
-
-
-#paired-end read merging
-start=$(date +%s)
-
-function merge()
-{
-    #sequence nomenclature:
-    # 2014-SEQ-0729_S5_L001_R1_001.fastq.gz
-    r1="$1"
-    r2=$(echo "$r1" | sed 's/_1P/_2P/')
-    sample=$(basename "$r1" | cut -d '_' -f 1)
+    #merge
+    t1="${trimmed}"/"${sample}"_Trimmed_1P.fastq.gz
+    t2=$(echo "$t1" | sed 's/_1P/_2P/')
 
     bbmerge.sh "$memJava" \
         threads=$((cpu/maxProc)) \
-        in1="$r1" \
-        in2="$r2" \
+        in1="$t1" \
+        in2="$t2" \
         out="${merged}"/"${sample}"_merged.fastq.gz \
         outu1="${merged}"/"${sample}"_unmerged_1P.fastq.gz \
         outu2="${merged}"/"${sample}"_unmerged_2P.fastq.gz \
         pigz=t \
         unpigz=t \
         2> >(tee -a "${logs}"/merging/"${sample}".txt)
-}
 
-#make function available to parallel
-export -f merge  # -f is to export functions
-
-#Create report output directory
-[ -d "${logs}"/merging ] || mkdir -p "${logs}"/merging
-
-#run paired-end merging on multiple samples in parallel
-find -L "$trimmed" -type f -name "*.fastq.gz" -name "*_1P*" \
-    | parallel --env merge --env maxProc --env cpu --env memJava --env merged --env logs --jobs "$maxProc" "merge {}"
-
-#Elapsed time
-end=$(date +%s)
-elapsed=$(($end - $start))
-printf "Merging finished in %dh:%dm:%ds\n" \
-    $(($elapsed/3600)) $(($elapsed%3600/60)) $(($elapsed%60)) | tee -a "${logs}"/log.txt
-
-#remove trimmed files
-rm "${trimmed}"/*
+    #Free up some disk space; remove trimmed reads
+    rm  "${trimmed}"/"${sample}"*
 
 
-#######################
-#                     #
-#   FastQc - Merged   #
-#                     #
-#######################
-
-
-# Prepare list of files
-[ -e "${qc}"/fastqc/list.txt ] && rm "${qc}"/fastqc/list.txt
-for i in $(find "$merged" -type f -name "*.fastq.gz"); do 
-    echo "$i" >> "${qc}"/fastqc/list.txt
-done
-ARRAY=($( cat "${qc}"/fastqc/list.txt ))
-list=$(echo "${ARRAY[@]}")
-
-#Create report output directory
-[ -d "${qc}"/fastqc/merged ] || mkdir -p "${qc}"/fastqc/merged
-
-#run FastQC
-fastqc \
-    --o "${qc}"/fastqc/merged \
-    --noextract \
-    --threads "$cpu" \
-    $list  # don't put in quotes
-
-#cleanup
-rm "${qc}"/fastqc/list.txt
-
-
-#####################
-#                   #
-#     Assembly      #
-#                   #
-#####################
-
-
-# "${merged}"/"${sample}"_merged.fastq.gz \
-# "${merged}"/"${sample}"_unmerged_1P.fastq.gz \
-# "${merged}"/"${sample}"_unmerged_2P.fastq.gz \
-
-#runtime
-start=$(date +%s)
-
-function assemble()
-{
-    path=$(dirname "$1")
-    sample=$(basename "$1" | cut -d '_' -f 1)
-
-    r1=""${path}"/"${sample}"_unmerged_1P.fastq.gz"
-    r2=$(echo "$r1" | sed 's/_1P/_2P/')
-
+    #assemble
     #create a separate output directory for each sample
     spadesOut=""${assembly}"/"${sample}""
     [ -d "$spadesOut" ] || mkdir -p "$spadesOut"
@@ -487,9 +236,9 @@ function assemble()
         -m $((mem/maxProc)) \
         -k "$kmer" \
         --careful \
-        --s1 "$1" \
-        --pe1-1 "$r1" \
-        --pe1-2 "$r2" \
+        --s1 "${merged}"/"${sample}"_merged.fastq.gz \
+        --pe1-1 "${merged}"/"${sample}"_unmerged_1P.fastq.gz \
+        --pe1-2 "${merged}"/"${sample}"_unmerged_2P.fastq.gz \
         -o "${spadesOut}"/ec &> /dev/null
 
     #corrected reads
@@ -514,134 +263,33 @@ function assemble()
 
     #do some cleanup after assembly (remove temporary files)
     find "$spadesOut" | awk 'NR > 1' | grep -v "${spadesOut}"/"${sample}"_assembly.fasta | xargs rm -rf
+
+    #Free up some disk space; remove merged reads
+    rm  "${merged}"/"${sample}"*
 }
 
-
 #make function available to parallel
-export -f assemble  # -f is to export functions
+export -f TrimMergeAssemble  # -f is to export functions
 
-#run assembly on multiple samples in parallel
-find "$merged" -type f -name "*_merged.fastq.gz" \
-    | parallel  --bar \
-                --env assemble \
+#Create report output directory
+[ -d "${logs}"/trimming ] || mkdir -p "${logs}"/trimming
+[ -d "${logs}"/merging ] || mkdir -p "${logs}"/merging
+
+#run trimming on multiple samples in parallel
+find -L "$fastq" -type f -name "*.fastq.gz" -name "*_R1*" \
+    | parallel  --env TrimMergeAssemble \
+                --env cpu \
                 --env maxProc \
+                --env memJava \
+                --env prog \
+                --env trimmed \
+                --env merged \
                 --env assembly \
                 --env mem \
                 --env kmer \
-                --env cpu \
-                --jobs "$maxProc" \
-                'assemble {}'
-
-#Elapsed time
-end=$(date +%s)
-elapsed=$(($end - $start))
-printf "Assembly finished in %dh:%dm:%ds\n" \
-    $(($elapsed/3600)) $(($elapsed%3600/60)) $(($elapsed%60)) | tee -a "${logs}"/log.txt
-
-
-
-# Remove merged files
-rm "${merged}"/*
-
-
-#############
-#           #
-#   Quast   #
-#           #
-#############
-
-
-#All the genomes compared
-[ -e "${assembly}"/list.txt ] && rm "${assembly}"/list.txt
-for i in $(find "$assembly" -type f -name "*_assembly.fasta"); do 
-    echo "$i" >> "${assembly}"/list.txt
-done
-
-ARRAY=($(cat "${assembly}"/list.txt))
-list=$(echo "${ARRAY[@]}")
-
-quast.py \
-    -s \
-    -o "${assembly}"/quast \
-    -t "$cpu" \
-    $list  # don't put in quotes
-
-
-# Make quast report on individual assembly
-function runQuast()
-{
-    sample=$(basename "$1" | cut -d '_' -f 1)
-
-    quast.py \
-        -t $((cpu/maxProc)) \
-        -o "${assembly}"/"${sample}"/quast \
-        -s \
-        -L \
-        "$1"  # don't put in quotes
-}
-
-#make function available to parallel
-export -f runQuast  # -f is to export functions
-
-#run paired-end merging on multiple samples in parallel
-find "$assembly" -type f -name "*_assembly.fasta" \
-    | parallel  --env runQuast \
-                --env maxProc \
-                --env cpu \
-                --env assembly \
                 --env logs \
                 --jobs "$maxProc" \
-                "runQuast {}"
-
-
-
-
-######################
-#                    #
-#     Annotation     #
-#                    #
-######################
-
-
-# #runtime
-# start=$(date +%s)
-
-# function annotate()
-# {
-#     sample=$(basename "$1" | cut -d '_' -f 1)
-#     spadesOut=""${assembly}"/"${sample}""
-
-#     #run prokka
-#     prokka --outdir ""${spadesOut}"/annotation" \
-#         --force \
-#         --prefix ""${sample}"_assembly" \
-#         --locustag "$sample" \
-#         --addgenes \
-#         --mincontiglen 200 \
-#         --centre "OLF" \
-#         --kingdom "$kingdom" \
-#         --genus "$genus" \
-#         --species "$species" \
-#         --strain "$sample" \
-#         --gram "$gram" \
-#         --cpus $((cpu/maxProc)) \
-#         --evalue "1e-6" \
-#         --rfam \
-#         "${spadesOut}"/"${sample}"_assembly.fasta
-# }
-
-# #make function available to parallel
-# export -f annotate  # -f is to export functions
-
-# #run paired-end merging on multiple samples in parallel
-# find "$assembly" -type f -name "*_assembly.fasta" \
-#     | parallel  --env annotate \
-#                 --env maxProc \
-#                 --env cpu \
-#                 --env assembly \
-#                 --jobs "$maxProc" \
-#                 "runQuast {}"
-
+                "TrimMergeAssemble {}"
 
 
 #########################
@@ -662,20 +310,20 @@ function assemblyTrimm()
         perl "${prog}"/phage_typing/removesmallscontigs.pl \
             2000 \
             "$1" \
-            > "${1%.fasta}"_trimmed2000.fasta
+            > "${1}".tmp
     elif [ $(cat "$1" | grep -Ec "^>") -eq 1 ]; then  # if only one contig
         #remove contigs smaller than 2000 bp from assembly
         perl "${prog}"/phage_typing/removesmallscontigs.pl \
             1500 \
             "$1" \
-            > "${1%.fasta}"_trimmed1500.fasta
+            > "${1}".tmp
     else
         echo "No assembly for "$sample""  # Should not get here!
         exit 1
     fi
 
     #replace old file
-    # mv "${1}".tmp "${1}"
+    mv "${1}".tmp "${1}"
 }
 
 #make function available to parallel
@@ -693,41 +341,27 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 ###############
 
 
-# Parallel submission results in the server to not respond
-
-# #Batch submit samples to PHASTER server
-# #Allow little delay between each sample
-# function phasterSubmit()
-# {
-#     name=$(basename "$1")
-#     sample=$(cut -d '_' -f 1 <<< "$name")
-
-#     # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
-#     wget --post-file="$1" \
-#         http://phaster.ca/phaster_api?contigs=1 \
-#         -O "${phaster}"/"${sample}"_query.json \
-#         -o "${phaster}"/"${sample}"_wget.log
-# }
-
-# #make function available to parallel
-# export -f phasterSubmit  # -f is to export functions
-
-# find "$assembly" -type f -name "*_assembly_trimmed*.fasta" \
-#     | parallel --delay 30 --env phasterSubmit --env phaster 'phasterSubmit {}'
-
-
-for i in $(find "$assembly" -type f -name "*_assembly_trimmed*.fasta"); do
-    sample=$(basename "$i" | cut -d '_' -f 1)
+#Batch submit samples to PHASTER server
+#Allow little deley between each sample
+function phasterSubmit()
+{
+    name=$(basename "$1")
+    sample=$(cut -d '_' -f 1 <<< "$name")
 
     # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
-    wget --post-file="$i" \
+    wget --post-file="$1" \
         http://phaster.ca/phaster_api?contigs=1 \
         -O "${phaster}"/"${sample}"_query.json \
         -o "${phaster}"/"${sample}"_wget.log
-done
+}
+
+#make function available to parallel
+export -f phasterSubmit  # -f is to export functions
+
+find "$assembly" -type f -name "*_assembly.fasta" \
+    | parallel --delay 30 --env phasterSubmit --env phaster 'phasterSubmit {}'
 
 
- 
 function phasterResults()
 {
     name=$(basename "$1")
@@ -904,6 +538,6 @@ make_otu_table.py \
     -o "${qiime}"/phages_clustered.biom
 
 
-
-
+#Deactivate the python virtual environment
+source deactivate
 
