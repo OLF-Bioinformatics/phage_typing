@@ -9,27 +9,22 @@
 
 
 #Analysis folder
-baseDir=""${HOME}"/analyses/assembly_test2"
+baseDir=""${HOME}"/analyses/salmonella_wallid"
 
 #reads
-reads="/media/3tb_hdd/data/salmonella_panel"
+reads="/media/3tb_hdd/data/salmonella_wallid"
 
 #program location
 export prog=""${HOME}"/prog"
 
-#Kraken DB
-export db="/media/3tb_hdd/db/kraken/refseq_BV_old"
 
 #Maximum number of cores used per sample for parallel processing
 #A highier value reduces the memory footprint.
-export maxProc=12
+export maxProc=3
 
 #k-mer size for SPAdes assembler (must be odd number(s))
 #Should be smaller that minimum trimmed read length
 export kmer="21,33,55,77,99,127"
-
-#Minimun contig length (for PHASTER)
-# export minContigLen=2000
 
 
 #######################
@@ -43,7 +38,6 @@ export kmer="21,33,55,77,99,127"
 fastq=""${baseDir}"/fastq"
 export logs=""${baseDir}"/logs"
 qc=""${baseDir}"/QC"
-export krakenOut=""${qc}"/kraken/raw"
 export trimmed=""${baseDir}"/trimmed"
 export merged=""${baseDir}"/merged"
 export assembly=""${baseDir}"/assembly"
@@ -93,32 +87,16 @@ echo -e "Processors: "$cpu"" | tee -a "${logs}"/log.txt
 echo -e "Memory: "$mem"G" | tee -a "${logs}"/log.txt
 
 #pipeline version
-echo -e "\nphage_diversity.sh version 0.1.0\n" | tee -a "${logs}"/log.txt  # $0
+echo -e "\nphage_diversity_HT.sh version 0.1.0\n" | tee -a "${logs}"/log.txt  # $0
 
 #check if depenencies are installed
 #if so, log version
-
-#Kraken
-if hash kraken 2>/dev/null; then  # if installed
-    kraken -v | grep "Kraken" | tee -a "${logs}"/log.txt
-else
-    echo >&2 "kraken was not found. Aborting." | tee -a "${logs}"/log.txt
-    exit 1
-fi
 
 #java
 if hash java 2>/dev/null; then 
     java -version 2>&1 1>/dev/null | grep "java version" | tr -d '"' | tee -a "${logs}"/log.txt
 else
     echo >&2 "java was not found. Aborting." | tee -a "${logs}"/log.txt
-    exit 1
-fi
-
-#FastQC
-if hash fastqc 2>/dev/null; then 
-    fastqc -v | tee -a "${logs}"/log.txt
-else
-    echo >&2 "fastQC was not found. Aborting." | tee -a "${logs}"/log.txt
     exit 1
 fi
 
@@ -143,14 +121,6 @@ if hash spades.py 2>/dev/null; then
     spades.py -v | tee -a "${logs}"/log.txt
 else
     echo >&2 "spades.py was not found. Aborting." | tee -a "${logs}"/log.txt
-    exit 1
-fi
-
-#QUAST
-if hash spades.py 2>/dev/null; then
-    quast.py -v | tee -a "${logs}"/log.txt
-else
-    echo >&2 "quast.py was not found. Aborting." | tee -a "${logs}"/log.txt
     exit 1
 fi
 
@@ -342,26 +312,20 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 
 
 #Batch submit samples to PHASTER server
-#Allow little deley between each sample
-function phasterSubmit()
-{
-    name=$(basename "$1")
-    sample=$(cut -d '_' -f 1 <<< "$name")
+for i in $(find "$assembly" -type f -name "*_assembly_trimmed*.fasta"); do
+    sample=$(basename "$i" | cut -d '_' -f 1)
 
     # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
-    wget --post-file="$1" \
+    wget --post-file="$i" \
         http://phaster.ca/phaster_api?contigs=1 \
         -O "${phaster}"/"${sample}"_query.json \
         -o "${phaster}"/"${sample}"_wget.log
-}
-
-#make function available to parallel
-export -f phasterSubmit  # -f is to export functions
-
-find "$assembly" -type f -name "*_assembly.fasta" \
-    | parallel --delay 30 --env phasterSubmit --env phaster 'phasterSubmit {}'
+done
 
 
+exit
+
+#Query results
 function phasterResults()
 {
     name=$(basename "$1")
