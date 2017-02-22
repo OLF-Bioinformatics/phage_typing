@@ -280,20 +280,20 @@ function assemblyTrimm()
         perl "${prog}"/phage_typing/removesmallscontigs.pl \
             2000 \
             "$1" \
-            > "${1}".tmp
+            > "${1%.fasta}"_trimmed2000.fasta
     elif [ $(cat "$1" | grep -Ec "^>") -eq 1 ]; then  # if only one contig
         #remove contigs smaller than 2000 bp from assembly
         perl "${prog}"/phage_typing/removesmallscontigs.pl \
             1500 \
             "$1" \
-            > "${1}".tmp
+            > "${1%.fasta}"_trimmed1500.fasta
     else
         echo "No assembly for "$sample""  # Should not get here!
         exit 1
     fi
 
     #replace old file
-    mv "${1}".tmp "${1}"
+    # mv "${1}".tmp "${1}"
 }
 
 #make function available to parallel
@@ -304,6 +304,7 @@ find "$assembly" -type f -name "*_assembly.fasta" \
     | parallel --env assemblyTrimm --env prog 'assemblyTrimm {}'
 
 
+
 ###############
 #             #
 #   PHASTER   #
@@ -311,7 +312,6 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 ###############
 
 
-#Batch submit samples to PHASTER server
 for i in $(find "$assembly" -type f -name "*_assembly_trimmed*.fasta"); do
     sample=$(basename "$i" | cut -d '_' -f 1)
 
@@ -323,9 +323,6 @@ for i in $(find "$assembly" -type f -name "*_assembly_trimmed*.fasta"); do
 done
 
 
-exit
-
-#Query results
 function phasterResults()
 {
     name=$(basename "$1")
@@ -378,58 +375,6 @@ export -f phasterResults  # -f is to export functions
 
 find "$assembly" -type f -name "*_assembly.fasta" \
     | parallel --delay 0.3 --env phasterResults --env phaster 'phasterResults {}'
-
-
-
-
-
-
-
-
-
-# for i in $(find "$assembly" -type f -name "*_assembly.fasta"); do
-#     name=$(basename "$i")
-#     sample=$(cut -d '_' -f 1 <<< "$name")
-
-#     #send query
-#     wget --post-file="$i" \
-#         http://phaster.ca/phaster_api?contigs=1 \
-#         -O "${phaster}"/"${sample}"_query.json  # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
-# done
-
-#     #Retrieve job ID from json file
-#     jobID=$(cat "${phaster}"/"${sample}"_query.json | cut -d ',' -f 1 | cut -d ":" -f 2 | tr -d '"')
-
-#     #check if PHASTER job is finished running
-#     status="Submitted"
-#     while [ "$status" != "Complete" ]; do
-#         #check status every 2 minutes
-#         echo "Job is "$status". Checking status back in 2 minutes" 
-#         sleep 2m  # sleep 2 minutes
-
-#         #get status
-#         wget http://phaster.ca/phaster_api?acc="$jobID" -O "${phaster}"/"${sample}"_status.json
-
-#         #check job status
-#         # {"job_id":"ZZ_7a1852db39","status":"1072 submissions ahead of yours..."}
-#         status=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 2 | cut -d ":" -f 2 | tr -d '"' | tr -d "}")
-#     done
-
-#     echo "PHASTER analysis of "$sample" is "$status""
-
-#     #get the PHASTER output file
-#     phasterZip=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 4 | cut -d ":" -f 2 | tr -d '"')
-#     wget "$phasterZip" -O "${phaster}"/"${sample}"_phaster.zip
-
-#     #Only get the fasta file out of the zip
-#     unzip -p \
-#         -j "${phaster}"/"${sample}"_phaster.zip \
-#         "phage_regions.fna" \
-#         > "${phaster}"/"${sample}"_phages.fasta
-
-#     #Add sample name and entry number to fasta header
-#     sed -i "s/^>/>"${sample}"_/" "${phaster}"/"${sample}"_phages.fasta
-# done
 
 
 #######################
