@@ -9,10 +9,10 @@
 
 
 #Analysis folder
-baseDir=""${HOME}"/analyses/salmonella_wallid"
+baseDir=""${HOME}"/analyses/salmonella_walid"
 
 #reads
-reads="/media/3tb_hdd/data/salmonella_wallid"
+reads="/media/3tb_hdd/data/salmonella_walid"
 
 #program location
 export prog=""${HOME}"/prog"
@@ -335,14 +335,20 @@ function phasterResults()
         jobID=$(cat "${phaster}"/"${sample}"_query.json | cut -d ',' -f 1 | cut -d ":" -f 2 | tr -d '"')
     done
 
-    #check if PHASTER job is finished running
-    status="Submitted"
+    
+    #get status
+    wget http://phaster.ca/phaster_api?acc="$jobID" -O "${phaster}"/"${sample}"_status.json
+    status=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 2 | cut -d ":" -f 2 | tr -d '"')
 
     # echo "PHASTER analysis of "$sample" is "$status""
+
+    #check if PHASTER job is finished running
     while [ "$status" != "Complete" ]; do
-        #check status every 2 minutes
-        echo "Job status of "$sample" is "$status". Checking status back in 2 minutes." 
-        sleep 2m  # sleep 2 minutes
+        waitTime="2m" # sleep 2 minutes
+
+        #check status every X time
+        echo "Job status of "$sample" is "$status". Checking status back in "$waitTime"." 
+        sleep "$waitTime"
 
         #get status
         wget http://phaster.ca/phaster_api?acc="$jobID" -O "${phaster}"/"${sample}"_status.json
@@ -355,23 +361,27 @@ function phasterResults()
 
     #get the PHASTER output file
     phasterZip=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 4 | cut -d ":" -f 2 | tr -d '"')
-    wget "$phasterZip" -O "${phaster}"/"${sample}"_phaster.zip
 
-    #Only get the fasta file out of the zip
-    unzip -p \
-        -j "${phaster}"/"${sample}"_phaster.zip \
-        "phage_regions.fna" \
-        > "${phaster}"/"${sample}"_phages.fasta
+    # Check if was already downloaded
+    if [ ! -s "${phaster}"/"${sample}"_phaster.zip ]; then
+        wget "$phasterZip" -O "${phaster}"/"${sample}"_phaster.zip
 
-    #Add sample name and entry number to fasta header
-    sed -i "s/^>/>"${sample}"_/" "${phaster}"/"${sample}"_phages.fasta
+        #Only get the fasta file out of the zip
+        unzip -p \
+            -j "${phaster}"/"${sample}"_phaster.zip \
+            "phage_regions.fna" \
+            > "${phaster}"/"${sample}"_phages.fasta
+
+        #Add sample name and entry number to fasta header
+        sed -i "s/^>/>"${sample}"_/" "${phaster}"/"${sample}"_phages.fasta
+    fi
 }
 
 #make function available to parallel
 export -f phasterResults  # -f is to export functions
 
 find "$assembly" -type f -name "*_assembly.fasta" \
-    | parallel --delay 0.3 --env phasterResults --env phaster 'phasterResults {}'
+    | parallel --bar --delay 0.3 --env phasterResults --env phaster 'phasterResults {}'
 
 
 #######################
