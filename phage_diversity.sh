@@ -31,6 +31,14 @@ export kmer="21,33,55,77,99,127"
 #Minimun contig length (for PHASTER)
 # export minContigLen=2000
 
+#Annotation
+# export centre="OLF"
+# export kingdom="bacteria"
+# export genus="Listeria"
+# export species="monocytogenes"
+# export strain="ATCC7644"
+# export gram="pos"
+
 
 #######################
 #                     #
@@ -603,9 +611,6 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 ######################
 
 
-# #runtime
-# start=$(date +%s)
-
 # function annotate()
 # {
 #     sample=$(basename "$1" | cut -d '_' -f 1)
@@ -618,7 +623,7 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 #         --locustag "$sample" \
 #         --addgenes \
 #         --mincontiglen 200 \
-#         --centre "OLF" \
+#         --centre "$centre" \
 #         --kingdom "$kingdom" \
 #         --genus "$genus" \
 #         --species "$species" \
@@ -633,15 +638,20 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 # #make function available to parallel
 # export -f annotate  # -f is to export functions
 
-# #run paired-end merging on multiple samples in parallel
+# #run annotation on multiple samples in parallel
 # find "$assembly" -type f -name "*_assembly.fasta" \
 #     | parallel  --env annotate \
+#                 --env centre \
+#                 --env kingdom  \
+#                 --env genus \
+#                 --env species \
+#                 --env strain \
+#                 --env gram \
 #                 --env maxProc \
 #                 --env cpu \
 #                 --env assembly \
 #                 --jobs "$maxProc" \
-#                 "runQuast {}"
-
+#                 "annotate {}"
 
 
 #########################
