@@ -440,6 +440,23 @@ perl "${prog}"/phage_typing/cdHitClstr2table.pl \
 
 #############
 #           #
+#   BLAST   #
+#           #
+#############
+
+
+#Identify the phage og the repesentative sequences from CD-HIT-EST
+blastx \
+    -query "${phaster}"/phages_clustered.fasta \
+    -db /media/3tb_hdd/db/blast/prophages/prophage_virus.db \
+    -out "${phaster}"/clusterID.blastx \
+    -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
+    -num_threads $(nproc) \
+    -max_target_seqs 1
+
+
+#############
+#           #
 #   QIIME   #
 #           #
 #############
