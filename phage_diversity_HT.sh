@@ -115,7 +115,7 @@ fi
 
 #SPAdes
 if hash spades.py 2>/dev/null; then
-    spades.py -v | tee -a "${logs}"/log.txt
+    spades.py -v 2>&1 1>/dev/null | tee -a "${logs}"/log.txt
 else
     echo >&2 "spades.py was not found. Aborting." | tee -a "${logs}"/log.txt
     exit 1
