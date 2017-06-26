@@ -1,11 +1,26 @@
 #!/bin/bash
 
 
-######################
-#                    #
-#    User Defined    #
-#                    #
-######################
+version="v0.1.1"
+
+
+:<<'END'
+Changelog
+
+v0.1.0 -> initial release
+v0.1.1 -> replaced kraken by centrifuge (more recent database)
+       -> add a assembly polishing step with pilon
+          (map corrected reads with bwa mem on scaffolded assembly)
+
+END
+
+
+
+####################
+#                  #
+#   User Defined   #
+#                  #
+####################
 
 
 #Analysis folder
@@ -16,9 +31,11 @@ reads="/media/3tb_hdd/data/salmonella_panel"
 
 #program location
 export prog=""${HOME}"/prog"
+export picard=""${prog}"/picard-tools/picard.jar"
 
-#Kraken DB
-export db="/media/3tb_hdd/db/kraken/refseq_BV_old"
+# Centrifuge DB to use
+db="/media/6tb_raid10/db/centrifuge/p_compressed+h+v"
+# db="/media/6tb_raid10/db/centrifuge/nt"
 
 #Maximum number of cores used per sample for parallel processing
 #A highier value reduces the memory footprint.
@@ -40,21 +57,23 @@ export kmer="21,33,55,77,99,127"
 # export gram="pos"
 
 
-#######################
-#                     #
-#   Data Stucture     #
-#                     #
-#######################
+#####################
+#                   #
+#   Data Stucture   #
+#                   #
+#####################
 
 
 #Folder structure
 fastq=""${baseDir}"/fastq"
 export logs=""${baseDir}"/logs"
 qc=""${baseDir}"/QC"
-export krakenOut=""${qc}"/kraken/raw"
+export centrifugeOut=""${qc}"/centrifuge/raw"
 export trimmed=""${baseDir}"/trimmed"
 export merged=""${baseDir}"/merged"
 export assembly=""${baseDir}"/assembly"
+export polished=""${assembly}"/polished"
+export annotation=""${baseDir}"/annotation"
 export phaster=""${baseDir}"/phaster"
 qiime=""${baseDir}"/qiime"
 
@@ -65,19 +84,20 @@ qiime=""${baseDir}"/qiime"
 [ -d "$fastq" ] || mkdir -p "$fastq"
 [ -d "$logs" ] || mkdir -p "$logs"
 [ -d "$qc" ] || mkdir -p "$qc"
-[ -d "$krakenOut" ] || mkdir -p "$krakenOut"
+[ -d "$centrifugeOut" ] || mkdir -p "$centrifugeOut"
 [ -d "$trimmed" ] || mkdir -p "$trimmed"
 [ -d "$merged" ] || mkdir -p "$merged"
 [ -d "$assembly" ] || mkdir -p "$assembly"
+[ -d "$polished" ] || mkdir -p "$polished"
 [ -d "$phaster" ] || mkdir -p "$phaster"
 [ -d "$qiime" ] || mkdir -p "$qiime"
 
 
-######################
-#                    #
-#     Resources      #
-#                    #
-######################
+#################
+#               #
+#   Resources   #
+#               #
+#################
 
 
 #computer performance
@@ -87,11 +107,11 @@ export memJava="-Xmx"$mem"g"
 memCdHit=$((mem*1000))
 
 
-#######################
-#                     #
-#   Initiating log    #
-#                     #
-#######################
+######################
+#                    #
+#   Initiating log   #
+#                    #
+######################
 
 
 #Date
@@ -116,11 +136,19 @@ echo -e "\nphage_diversity.sh version 0.1.0\n" | tee -a "${logs}"/log.txt  # $0
 #check if depenencies are installed
 #if so, log version
 
-#Kraken
-if hash kraken 2>/dev/null; then  # if installed
-    kraken -v | grep "Kraken" | tee -a "${logs}"/log.txt
+# Centrifuge
+if hash centrifuge 2>/dev/null; then  # if installed
+    centrifuge --version | grep "centrifuge-class" | sed -e 's%^.*/%%' -e 's/-class//' | tee -a "${logs}"/log.txt
 else
-    echo >&2 "kraken was not found. Aborting." | tee -a "${logs}"/log.txt
+    echo >&2 "centrifuge was not found. Aborting." | tee -a "${logs}"/log.txt
+    exit 1
+fi
+
+# Centrifuge database
+if [ -s "${db}".1.cf ]; then
+    echo "Centrifuge database: "$(basename "$db")"" | tee -a "${logs}"/log.txt
+else
+    echo "Could no find the provided Centrifude database. Aborting." | tee -a "${logs}"/log.txt
     exit 1
 fi
 
@@ -164,6 +192,24 @@ else
     exit 1
 fi
 
+#BWA mem
+if hash bwa 2>/dev/null; then
+    version=$(bwa 2>&1 1>/dev/null | grep "Version" | sed 's/Version: //')
+    echo "bwa v"$version"" | tee -a "${logs}"/log.txt
+else
+    echo >&2 "bwa was not found. Aborting." | tee -a "${logs}"/log.txt
+    exit 1
+fi   
+
+# Pilon
+java "$memJava" -jar "${prog}"/pilon/pilon-dev.jar
+if [ $# -eq 0 ]; then
+    java "$memJava" -jar "${prog}"/pilon/pilon-dev.jar --version | tee -a "${logs}"/log.txt
+else
+    echo >&2 "pilon was not found. Aborting." | tee -a "${logs}"/log.txt
+    exit 1
+fi
+
 #QUAST
 if hash spades.py 2>/dev/null; then
     quast.py -v | tee -a "${logs}"/log.txt
@@ -181,22 +227,16 @@ else
 fi
 
 
-########################
-#                      #
-#     Fastq files      #
-#                      #
-########################
+###################
+#                 #
+#   Fastq files   #
+#                 #
+###################
 
 
 #populate read folder with symbolic links pointing to paired-end fastq files
 find -L "$reads" -type f -name "*.fastq.gz" \
     | parallel --bar "ln -s {} "${fastq}"/{/}"  # {/} means basename in parallel -> https://www.gnu.org/software/parallel/man.html
-
-# for b in $(find "$reads" -type f -name "*.fastq.gz") #look in folder recursively.
-# do
-#   name=$(basename "$b") 
-#   ln -s "$b" "${fastq}"/"$name"
-# done
 
 
 ####################
@@ -223,52 +263,11 @@ fastqc \
     $list  # don't put in quotes
 
 
-####################
-#                  #
-#   Kraken - Raw   #
-#                  #
-####################
-
-
-#put kraken db into memory
-cat "${db}"/database.kdb > /dev/null  # About 6min to run
-
-
-# Can't run Kraken with parallel because it's using the database stored into memory
-
-# function krack()
-# {
-#     r1="$1"
-#     r2=$(echo "$r1" | sed 's/_R1/_R2/')
-#     name=$(basename "$r1") #discard the path
-#     sample=$(cut <<< "${name}" -d '_' -f 1) #only keep the first part of the file name, before the first "_"
-
-#     #Output folder
-#     out=""${krakenOut}"/"${sample}""
-#     [ -d "$out" ] || mkdir -p "$out"
-
-#     kraken --db "$db" \
-#         --output "${out}"/"${sample}".kraken \
-#         --threads $((cpu/maxProc)) \
-#         --gzip-compressed \
-#         --check-names \
-#         --fastq-input \
-#         --paired "$r1" "$r2" \
-#         &> >(tee "${out}"/"${sample}".kraken.log)
-
-#     #Prepare result for display with Krona
-#     cat "${out}"/"${sample}".kraken \
-#         | cut -f 2-3 \
-#         | ktImportTaxonomy /dev/stdin -o "${out}"/"${sample}".html
-# }
-
-
-# #make function available to parallel
-# export -f krack  # -f is to export functions
-
-# #Run Kraken in parallel
-# find -L "$fastq" -type f -name "*.fastq.gz" -name "*_R1*" \
-#     | parallel --env db --env maxProc --env krack --env krakenOut --jobs "$maxProc" "krack {}"
+########################
+#                      #
+#   Centrifuge - Raw   #
+#                      #
+########################
 
 
 start=$(date +%s)
@@ -280,45 +279,43 @@ for k in $(find -L "$fastq" -type f -name "*_R1*" -name "*.fastq.gz"); do #find 
     sample=$(basename "$r1" | cut -d '_' -f 1)  #discard the path and only keep the first part of the file name, before the first "_"
 
     #Output folder
-    out=""${krakenOut}"/"${sample}""
-    [ -d "$out" ] || mkdir -p "$out"
+    [ -d "${centrifugeOut}"/"${sample}" ] || mkdir -p "${centrifugeOut}"/"${sample}"
 
-    #run Kraken
-    kraken --db "$db" \
-        --output "${out}"/"${sample}".kraken \
-        --threads "$cpu" \
-        --gzip-compressed \
-        --check-names \
-        --fastq-input \
-        --paired "$r1" "$r2" \
-        &> >(tee "${out}"/"${sample}".kraken.log)
+    #run Centrifuge
+    centrifuge \
+        -p "$cpu" \
+        --seed "$RANDOM" \
+        -x "$db" \
+        -1 "$r1" \
+        -2 "$r2" \
+        --report-file "${centrifugeOut}"/"${sample}"/"${sample}"_report.tsv \
+        > "${centrifugeOut}"/"${sample}"/"${sample}".tsv
 
-    #Prepare result for display with Krona
-    cat "${out}"/"${sample}".kraken \
-        | cut -f 2-3 \
-        | ktImportTaxonomy /dev/stdin -o "${out}"/"${sample}".html
+    cat "${centrifugeOut}"/"${sample}"/"${sample}".tsv | \
+        cut -f 1,3 | \
+        ktImportTaxonomy /dev/stdin -o  "${centrifugeOut}"/"${sample}"/"${sample}".html
 
     #visualize the resutls in Firefow browser
-    # firefox file://"${out}"/"${sample}".html &
+    # firefox file://"${centrifugeOut}"/"${sample}"/"${sample}".html
 done
 
 #Elapsed time
 end=$(date +%s)
 elapsed=$(($end - $start))
-printf "Kraken analysis finished in %dh:%dm:%ds\n" \
+printf "Centrifuge analysis finished in %dh:%dm:%ds\n" \
     $(($elapsed/3600)) $(($elapsed%3600/60)) $(($elapsed%60)) | tee -a "${logs}"/log.txt
 
 
-#####################
-#                   #
-#     Trimming      #
-#                   #
-#####################
+####################
+#                  #
+#     Trimming     #
+#                  #
+####################
 
 
 start=$(date +%s)
 
-function trimm()
+function trim()
 {
     #sequence nomenclature:
     # 2014-SEQ-0729_S5_L001_R1_001.fastq.gz
@@ -342,14 +339,22 @@ function trimm()
 }
 
 #make function available to parallel
-export -f trimm  # -f is to export functions
+export -f trim  # -f is to export functions
 
 #Create report output directory
 [ -d "${logs}"/trimming ] || mkdir -p "${logs}"/trimming
 
 #run trimming on multiple samples in parallel
 find -L "$fastq" -type f -name "*.fastq.gz" -name "*_R1*" \
-    | parallel --env trimm --env cpu --env maxProc --env memJava --env prog --env trimmed --env logs --jobs "$maxProc" "trimm {}"
+    | parallel  --env trim \
+                --env cpu \
+                --env maxProc \
+                --env memJava \
+                --env prog \
+                --env trimmed \
+                --env logs \
+                --jobs "$maxProc" \
+                "trim {}"
 
 #Elapsed time
 end=$(date +%s)
@@ -382,11 +387,11 @@ fastqc \
     $list  # don't put in quotes
 
 
-####################
-#                  #
-#     Merging      #
-#                  #
-####################
+###############
+#             #
+#   Merging   #
+#             #
+###############
 
 
 #paired-end read merging
@@ -420,7 +425,14 @@ export -f merge  # -f is to export functions
 
 #run paired-end merging on multiple samples in parallel
 find -L "$trimmed" -type f -name "*.fastq.gz" -name "*_1P*" \
-    | parallel --env merge --env maxProc --env cpu --env memJava --env merged --env logs --jobs "$maxProc" "merge {}"
+    | parallel  --env merge \
+                --env maxProc \
+                --env cpu \
+                --env memJava \
+                --env merged \
+                --env logs \
+                --jobs "$maxProc" \
+                "merge {}"
 
 #Elapsed time
 end=$(date +%s)
@@ -461,11 +473,11 @@ fastqc \
 rm "${qc}"/fastqc/list.txt
 
 
-#####################
-#                   #
-#     Assembly      #
-#                   #
-#####################
+################
+#              #
+#   Assembly   #
+#              #
+################
 
 
 # "${merged}"/"${sample}"_merged.fastq.gz \
@@ -518,20 +530,19 @@ function assemble()
         -o "$spadesOut" &> /dev/null
 
     #remane scaffolds.fasta
-    mv "${spadesOut}"/scaffolds.fasta "${spadesOut}"/"${sample}"_assembly.fasta
+    # mv "${spadesOut}"/scaffolds.fasta "${spadesOut}"/"${sample}"_assembly.fasta
 
     #do some cleanup after assembly (remove temporary files)
-    find "$spadesOut" | awk 'NR > 1' | grep -v "${spadesOut}"/"${sample}"_assembly.fasta | xargs rm -rf
-}
+    # find "$spadesOut" | awk 'NR > 1' | grep -v "${spadesOut}"/"${sample}"_assembly.fasta | xargs rm -rf
 
+}
 
 #make function available to parallel
 export -f assemble  # -f is to export functions
 
 #run assembly on multiple samples in parallel
 find "$merged" -type f -name "*_merged.fastq.gz" \
-    | parallel  --bar \
-                --env assemble \
+    | parallel  --env assemble \
                 --env maxProc \
                 --env assembly \
                 --env mem \
@@ -546,10 +557,100 @@ elapsed=$(($end - $start))
 printf "Assembly finished in %dh:%dm:%ds\n" \
     $(($elapsed/3600)) $(($elapsed%3600/60)) $(($elapsed%60)) | tee -a "${logs}"/log.txt
 
-
-
 # Remove merged files
 rm "${merged}"/*
+
+
+#################
+#               #
+#   Polishing   #
+#               #
+#################
+
+
+function polish()
+{
+    genome="$1"
+    path=$(dirname "$genome")
+    sample=$(basename "$path")
+
+    #index assembly
+    bwa index "$genome"
+
+    #corrected reads to map
+    cor_m=$(find "${assembly}"/"${sample}"/ec/corrected -type f -name "*_merged*cor.fastq.gz")
+    cor_1p=$(find "${assembly}"/"${sample}"/ec/corrected -type f -name "*_unmerged_1P*cor.fastq.gz")
+    cor_2p=$(find "${assembly}"/"${sample}"/ec/corrected -type f -name "*_unmerged_2P*cor.fastq.gz")
+
+    #create output folder
+    [ -d "${polished}"/"${sample}" ] || mkdir -p "${polished}"/"${sample}"
+
+    #map unmerged (paired-end) reads
+    bwa mem -x intractg -t $((cpu/maxProc)) -r 1 -a -M "$genome" "$cor_1p" "$cor_2p" | \
+        samtools view -@ $((cpu/maxProc)) -b -h - | \
+        samtools sort -@ $((cpu/maxProc)) -m 10G -o "${polished}"/"${sample}"/"${sample}"_unmerged.bam -
+
+    #remove duplicates for paired-end reads
+    samtools rmdup \
+        "${polished}"/"${sample}"/"${sample}"_unmerged.bam \
+        "${polished}"/"${sample}"/"${sample}"_unmerged_nodup.bam
+
+    #index bam file
+    samtools index "${polished}"/"${sample}"/"${sample}"_unmerged_nodup.bam
+
+    #remove bam file with duplicates
+    rm "${polished}"/"${sample}"/"${sample}"_unmerged.bam
+
+    #map merged (single end) reads
+    bwa mem -x intractg -t $((cpu/maxProc)) -r 1 -a -M "$genome" "$cor_m" | \
+        samtools view -@ $((cpu/maxProc)) -b -h - | \
+        samtools sort -@ $((cpu/maxProc)) -m 10G -o "${polished}"/"${sample}"/"${sample}"_merged.bam -
+
+    # remove duplicates for sinle-end reads
+    java -Xmx64g -jar "$picard" MarkDuplicates \
+        INPUT="${polished}"/"${sample}"/"${sample}"_merged.bam \
+        OUTPUT="${polished}"/"${sample}"/"${sample}"_merged_nodup.bam \
+        METRICS_FILE="${polished}"/"${sample}"/"${sample}"_merged_duplicates.txt \
+        ASSUME_SORTED=true \
+        REMOVE_DUPLICATES=true
+
+    #index bam file
+    samtools index "${polished}"/"${sample}"/"${sample}"_merged_nodup.bam
+
+    #remove bam file with duplicates
+    rm "${polished}"/"${sample}"/"${sample}"_merged.bam
+
+    #remove picard metric file
+    rm "${polished}"/"${sample}"/"${sample}"_merged_duplicates.txt
+
+    #Correct contigs using pilon based on the Illumina reads
+    # java "$memJava" -XX:+UseConcMarkSweepGC -XX:-UseGCOverheadLimit \
+    java "$memJava" -jar "${prog}"/pilon/pilon-dev.jar \
+        --threads $((cpu/maxProc)) \
+        --genome "$genome" \
+        --frags "${polished}"/"${sample}"/"${sample}"_unmerged_nodup.bam \
+        --unpaired "${polished}"/"${sample}"/"${sample}"_merged_nodup.bam \
+        --outdir "${polished}"/"${sample}" \
+        --output "${sample}"_pilon \
+        --changes
+}
+
+#make function available to parallel
+export -f polish  # -f is to export functions
+
+#run assembly on multiple samples in parallel
+find "$assembly" -maxdepth 2 -type f -name "scaffolds.fasta" \
+    | parallel  --bar \
+                --env polish \
+                --env cpu \
+                --env prog \
+                --env picard \
+                --env memJava \
+                --env maxProc \
+                --env assembly \
+                --env polished \
+                --jobs "$maxProc" \
+                'polish {}'
 
 
 #############
@@ -559,18 +660,21 @@ rm "${merged}"/*
 #############
 
 
+#create quast folder
+[ -d "${qc}"/quast ] || mkdir -p "${qc}"/quast
+
 #All the genomes compared
-[ -e "${assembly}"/list.txt ] && rm "${assembly}"/list.txt
-for i in $(find "$assembly" -type f -name "*_assembly.fasta"); do 
-    echo "$i" >> "${assembly}"/list.txt
+[ -e "${qc}"/quast/list.txt ] && rm "${qc}"/quast/list.txt
+for i in $(find "$polished" -type f -name "*_pilon.fasta"); do 
+    echo "$i" >> "${qc}"/quast/list.txt
 done
 
-ARRAY=($(cat "${assembly}"/list.txt))
+ARRAY=($(cat "${qc}"/quast/list.txt))
 list=$(echo "${ARRAY[@]}")
 
 quast.py \
     -s \
-    -o "${assembly}"/quast \
+    -o "${qc}"/quast \
     -t "$cpu" \
     $list  # don't put in quotes
 
@@ -580,44 +684,44 @@ function runQuast()
 {
     sample=$(basename "$1" | cut -d '_' -f 1)
 
+    # #create output folder
+    # [ -d "${qc}"/quast/"${sample}" ] || mkdir -p "${qc}"/quast/"${sample}"
+
     quast.py \
         -t $((cpu/maxProc)) \
-        -o "${assembly}"/"${sample}"/quast \
+        -o "${qc}"/quast/"${sample}" \
         -s \
         -L \
-        "$1"  # don't put in quotes
+        $1
 }
 
 #make function available to parallel
 export -f runQuast  # -f is to export functions
 
 #run paired-end merging on multiple samples in parallel
-find "$assembly" -type f -name "*_assembly.fasta" \
+find "$polished" -type f -name "*_pilon.fasta" \
     | parallel  --env runQuast \
                 --env maxProc \
                 --env cpu \
-                --env assembly \
+                --env qc \
                 --env logs \
                 --jobs "$maxProc" \
                 "runQuast {}"
 
 
-
-
-######################
-#                    #
-#     Annotation     #
-#                    #
-######################
+##################
+#                #
+#   Annotation   #
+#                #
+##################
 
 
 # function annotate()
 # {
 #     sample=$(basename "$1" | cut -d '_' -f 1)
-#     spadesOut=""${assembly}"/"${sample}""
 
 #     #run prokka
-#     prokka --outdir ""${spadesOut}"/annotation" \
+#     prokka --outdir ${annotation}"/"${sample}" \
 #         --force \
 #         --prefix ""${sample}"_assembly" \
 #         --locustag "$sample" \
@@ -632,24 +736,23 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 #         --cpus $((cpu/maxProc)) \
 #         --evalue "1e-6" \
 #         --rfam \
-#         "${spadesOut}"/"${sample}"_assembly.fasta
+#         "$1"
 # }
 
 # #make function available to parallel
 # export -f annotate  # -f is to export functions
 
 # #run annotation on multiple samples in parallel
-# find "$assembly" -type f -name "*_assembly.fasta" \
+# find "$polished" -type f -name "*_pilon.fasta" \
 #     | parallel  --env annotate \
 #                 --env centre \
 #                 --env kingdom  \
 #                 --env genus \
 #                 --env species \
-#                 --env strain \
 #                 --env gram \
 #                 --env maxProc \
 #                 --env cpu \
-#                 --env assembly \
+#                 --env annotation \
 #                 --jobs "$maxProc" \
 #                 "annotate {}"
 
@@ -692,8 +795,11 @@ function assemblyTrimm()
 export -f assemblyTrimm  # -f is to export functions
 
 #run trimming on multiple assemblies in parallel
-find "$assembly" -type f -name "*_assembly.fasta" \
-    | parallel --env assemblyTrimm --env prog 'assemblyTrimm {}'
+find "$polished" -type f -name "*_pilon.fasta" \
+    | parallel  --bar \
+                --env assemblyTrimm \
+                --env prog \
+                'assemblyTrimm {}'
 
 
 ###############
@@ -726,7 +832,7 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 #     | parallel --delay 30 --env phasterSubmit --env phaster 'phasterSubmit {}'
 
 
-for i in $(find "$assembly" -type f -name "*_assembly_trimmed*.fasta"); do
+for i in $(find "$polished" -type f -name "*_pilon_trimmed*.fasta"); do
     sample=$(basename "$i" | cut -d '_' -f 1)
 
     # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
@@ -788,60 +894,8 @@ function phasterResults()
 #make function available to parallel
 export -f phasterResults  # -f is to export functions
 
-find "$assembly" -type f -name "*_assembly.fasta" \
+find "$polished" -type f -name "*_pilon_trimmed*.fasta" \
     | parallel --delay 0.3 --env phasterResults --env phaster 'phasterResults {}'
-
-
-
-
-
-
-
-
-
-# for i in $(find "$assembly" -type f -name "*_assembly.fasta"); do
-#     name=$(basename "$i")
-#     sample=$(cut -d '_' -f 1 <<< "$name")
-
-#     #send query
-#     wget --post-file="$i" \
-#         http://phaster.ca/phaster_api?contigs=1 \
-#         -O "${phaster}"/"${sample}"_query.json  # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
-# done
-
-#     #Retrieve job ID from json file
-#     jobID=$(cat "${phaster}"/"${sample}"_query.json | cut -d ',' -f 1 | cut -d ":" -f 2 | tr -d '"')
-
-#     #check if PHASTER job is finished running
-#     status="Submitted"
-#     while [ "$status" != "Complete" ]; do
-#         #check status every 2 minutes
-#         echo "Job is "$status". Checking status back in 2 minutes" 
-#         sleep 2m  # sleep 2 minutes
-
-#         #get status
-#         wget http://phaster.ca/phaster_api?acc="$jobID" -O "${phaster}"/"${sample}"_status.json
-
-#         #check job status
-#         # {"job_id":"ZZ_7a1852db39","status":"1072 submissions ahead of yours..."}
-#         status=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 2 | cut -d ":" -f 2 | tr -d '"' | tr -d "}")
-#     done
-
-#     echo "PHASTER analysis of "$sample" is "$status""
-
-#     #get the PHASTER output file
-#     phasterZip=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 4 | cut -d ":" -f 2 | tr -d '"')
-#     wget "$phasterZip" -O "${phaster}"/"${sample}"_phaster.zip
-
-#     #Only get the fasta file out of the zip
-#     unzip -p \
-#         -j "${phaster}"/"${sample}"_phaster.zip \
-#         "phage_regions.fna" \
-#         > "${phaster}"/"${sample}"_phages.fasta
-
-#     #Add sample name and entry number to fasta header
-#     sed -i "s/^>/>"${sample}"_/" "${phaster}"/"${sample}"_phages.fasta
-# done
 
 
 #######################
@@ -851,13 +905,12 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 #######################
 
 
+# Concatenate all phage sequences found by phaster
 for i in $(find "$phaster" -type f -name "*_phages.fasta"); do
     cat "$i" >> "${phaster}"/phages_all.fasta
 done
 
-
 # http://weizhongli-lab.org/lab-wiki/doku.php?id=cd-hit-user-guide
-
 # For DNAs:
 
     # Word size 10-11 is for thresholds 0.95 ~ 1.0
@@ -867,7 +920,7 @@ done
     # Word size 5 is for thresholds 0.80 ~ 0.85
     # Word size 4 is for thresholds 0.75 ~ 0.8
 
-#cluster similar phages together with CD-HIT-EST
+#cluster similar phage sequences together with CD-HIT-EST
 cd-hit-est \
     -i "${phaster}"/phages_all.fasta \
     -o "${phaster}"/phages_clustered.fasta \
