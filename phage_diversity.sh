@@ -67,7 +67,7 @@ export kmer="21,33,55,77,99,127"
 #Folder structure
 fastq=""${baseDir}"/fastq"
 export logs=""${baseDir}"/logs"
-qc=""${baseDir}"/QC"
+export qc=""${baseDir}"/QC"
 export centrifugeOut=""${qc}"/centrifuge/raw"
 export trimmed=""${baseDir}"/trimmed"
 export merged=""${baseDir}"/merged"
