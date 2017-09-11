@@ -9,10 +9,10 @@
 
 
 #Analysis folder
-baseDir=""${HOME}"/analyses/salmonella_walid"
+baseDir=""${HOME}"/analyses/salmonella_walid_extra3"
 
 #reads
-reads="/media/3tb_hdd/data/salmonella_walid"
+reads="/media/6tb_raid10/data/salmonella_walid_extra3"
 
 #program location
 export prog=""${HOME}"/prog"
@@ -309,16 +309,25 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 ###############
 
 
-for i in $(find "$assembly" -type f -name "*_assembly_trimmed*.fasta"); do
-    sample=$(basename "$i" | cut -d '_' -f 1)
+function phasterSubmit()
+{
+    sample=$(basename "$1" | cut -d '_' -f 1)
 
-    # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
-    wget --post-file="$i" \
+    wget --post-file="$1" \
         http://phaster.ca/phaster_api?contigs=1 \
         -O "${phaster}"/"${sample}"_query.json \
         -o "${phaster}"/"${sample}"_wget.log
-done
+}
 
+# Submit samples to PHASTER
+total=$(find "$assembly" -type f -name "*_assembly_trimmed*.fasta" | wc -l)
+counter=0
+for i in $(find "$assembly" -type f -name "*_assembly_trimmed*.fasta"); do
+    let counter=counter+1
+    echo -ne "Progress: "${counter}"/"${total}"\r"
+
+    phasterSubmit "$i"
+done
 
 function phasterResults()
 {
@@ -326,6 +335,7 @@ function phasterResults()
     sample=$(cut -d '_' -f 1 <<< "$name")
 
     #Retrieve job ID from json file
+    # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
     jobID=$(cat "${phaster}"/"${sample}"_query.json | cut -d ',' -f 1 | cut -d ":" -f 2 | tr -d '"')
     # echo ""${sample}": "$jobID""  # debug
 
@@ -335,7 +345,6 @@ function phasterResults()
         jobID=$(cat "${phaster}"/"${sample}"_query.json | cut -d ',' -f 1 | cut -d ":" -f 2 | tr -d '"')
     done
 
-    
     #get status
     wget http://phaster.ca/phaster_api?acc="$jobID" -O "${phaster}"/"${sample}"_status.json
     status=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 2 | cut -d ":" -f 2 | tr -d '"')
@@ -344,7 +353,7 @@ function phasterResults()
 
     #check if PHASTER job is finished running
     while [ "$status" != "Complete" ]; do
-        waitTime="2m" # sleep 2 minutes
+        waitTime="30s" # sleep 
 
         #check status every X time
         echo "Job status of "$sample" is "$status". Checking status back in "$waitTime"." 
@@ -381,7 +390,17 @@ function phasterResults()
 export -f phasterResults  # -f is to export functions
 
 find "$assembly" -type f -name "*_assembly.fasta" \
-    | parallel --bar --delay 0.3 --env phasterResults --env phaster 'phasterResults {}'
+    | parallel  --bar \
+                --delay 0.3 \
+                -j "$cpu" \
+                --env phasterResults \
+                --env phaster \
+                'phasterResults {}'
+
+# for i in $(find "$assembly" -type f -name "*_assembly.fasta"); do
+#     phasterResults "$i"
+# done
+
 
 
 #######################
