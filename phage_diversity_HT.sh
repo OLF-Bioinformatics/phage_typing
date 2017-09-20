@@ -27,6 +27,20 @@ export maxProc=3
 export kmer="21,33,55,77,99,127"
 
 
+######################
+#                    #
+#     Resources      #
+#                    #
+######################
+
+
+#computer performance
+export cpu=$(nproc) #total number of cores
+export mem=$(($(grep MemTotal /proc/meminfo | awk '{print $2}')*85/100000000)) #85% of total memory in GB
+export memJava="-Xmx"$mem"g"
+memCdHit=$((mem*1000))
+
+
 #######################
 #                     #
 #   Data Stucture     #
@@ -54,20 +68,6 @@ qiime=""${baseDir}"/qiime"
 [ -d "$assembly" ] || mkdir -p "$assembly"
 [ -d "$phaster" ] || mkdir -p "$phaster"
 [ -d "$qiime" ] || mkdir -p "$qiime"
-
-
-######################
-#                    #
-#     Resources      #
-#                    #
-######################
-
-
-#computer performance
-export cpu=$(nproc) #total number of cores
-export mem=$(($(grep MemTotal /proc/meminfo | awk '{print $2}')*85/100000000)) #85% of total memory in GB
-export memJava="-Xmx"$mem"g"
-memCdHit=$((mem*1000))
 
 
 #######################
@@ -386,20 +386,26 @@ function phasterResults()
     fi
 }
 
-#make function available to parallel
-export -f phasterResults  # -f is to export functions
+# #make function available to parallel
+# export -f phasterResults  # -f is to export functions
 
-find "$assembly" -type f -name "*_assembly.fasta" \
-    | parallel  --bar \
-                --delay 0.3 \
-                -j "$cpu" \
-                --env phasterResults \
-                --env phaster \
-                'phasterResults {}'
+# Parallel downlaoding results in an overload of the CPUs and no more download afer ~123 samples.
+# find "$assembly" -type f -name "*_assembly.fasta" \
+#     | parallel  --bar \
+#                 --delay 0.3 \
+#                 --env phasterResults \
+#                 --env phaster \
+#                 --jobs "$cpu" \
+#                 'phasterResults {}'
 
-# for i in $(find "$assembly" -type f -name "*_assembly.fasta"); do
-#     phasterResults "$i"
-# done
+
+total=$(find "$assembly" -type f -name "*_assembly.fasta" | wc -l)
+counter=0
+for i in $(find "$assembly" -type f -name "*_assembly.fasta"); do
+    let counter=counter+1
+    echo -ne "Progress: "${counter}"/"${total}"\r"
+    phasterResults "$i"
+done
 
 
 
