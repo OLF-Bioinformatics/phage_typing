@@ -403,8 +403,14 @@ total=$(find "$assembly" -type f -name "*_assembly.fasta" | wc -l)
 counter=0
 for i in $(find "$assembly" -type f -name "*_assembly.fasta"); do
     let counter=counter+1
-    echo -ne "Progress: "${counter}"/"${total}"\r"
-    phasterResults "$i"
+    echo "Progress: "${counter}"/"${total}""
+
+    name=$(basename "$i")
+    sample=$(cut -d '_' -f 1 <<< "$name")
+
+    if [ ! -s "${phaster}"/"${sample}"_phaster.zip ]; then
+        phasterResults "$i"
+    fi
 done
 
 
