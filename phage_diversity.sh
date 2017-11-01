@@ -953,6 +953,30 @@ perl "${prog}"/phage_typing/cdHitClstr2table.pl \
 
 #############
 #           #
+#   BLAST   #
+#           #
+#############
+
+
+#Identify the phage of the repesentative sequences from CD-HIT-EST
+blastx \
+    -query "${phaster}"/phages_clustered.fasta \
+    -db "/media/6tb_raid10/db/blast/prophages/prophage_virus.db" \
+    -out "${phaster}"/clusterID.blastx \
+    -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
+    -num_threads $(nproc) \
+    -max_target_seqs 1
+
+#Add header to blast output
+echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
+    > "${phaster}"/tmp.txt
+cat "${phaster}"/clusterID.blastx \
+    >> "${phaster}"/tmp.txt
+mv "${phaster}"/tmp.txt "${phaster}"/clusterID.blastx
+
+
+#############
+#           #
 #   QIIME   #
 #           #
 #############

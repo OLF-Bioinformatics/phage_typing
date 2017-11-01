@@ -34,19 +34,6 @@ if (!defined($input_sampleList) || !defined($input_clstr) || !defined($output_ta
 }
 
 
-##I\O files
-#my $input_sampleList = $ARGV[0];  # a text files with all samples listed. One sample per line.
-#my $input_clstr = $ARGV[1];  # Output ".clstr" file from CD-HIT-EST
-#my $output_table = $ARGV[2];  # Tab-separated output table
-#
-## Test if all required arguments are present
-#if (scalar(@ARGV) != 3)
-#{
-#    print "Usage: perl cdHitClstr2table.pl <sampleList.txt> <cd-hit.clstr> <outputTable.tsv>\n";
-#    exit;
-#}
-
-
 ##############################
 #                            #
 #   Parse sample list file   #
@@ -55,7 +42,7 @@ if (!defined($input_sampleList) || !defined($input_clstr) || !defined($output_ta
 
 
 # open sample list file in read-only mode
-open (my $input_sampleList_fh, "<", $input_sampleList) or die "Cannot open $input_sampleList: $!";
+open (my $input_sampleList_fh, "<", $input_sampleList) or die "Cannot open $input_sampleList: $!\n";
 
 my @samples;
 
@@ -78,7 +65,7 @@ close($input_sampleList_fh);
 
 
 # Open cd-hit-est cluster report file in read-only mode
-open (my $input_clstr_fh, "<", $input_clstr) or die "Cannot open $input_clstr: $!";
+open (my $input_clstr_fh, "<", $input_clstr) or die "Cannot open $input_clstr: $!\n";
 
 # Put sequence from list in an array
 my %clusters;  # Cluster ID
@@ -136,7 +123,7 @@ close ($input_clstr_fh);
 open (my $output_table_fh, ">", $output_table) or die "Cannot open $output_table: $!";
 
 # Print
-print {$output_table_fh} ("# Constructed from biom file" . "\n");
+# print {$output_table_fh} ("# Constructed from biom file" . "\n");
 
 # Print header with sample names
 print {$output_table_fh} ("#OTU ID" . "\t" . join("\t", sort(@samples)) . "\n");
