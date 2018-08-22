@@ -77,6 +77,8 @@ qiime=""${baseDir}"/qiime"
 #######################
 
 
+version='0.2'
+
 #Date
 echo -e "$(date)\n" | tee "${logs}"/log.txt
 echo -e "User: $(whoami)" | tee -a "${logs}"/log.txt
@@ -84,7 +86,7 @@ echo -e "Processors: "$cpu"" | tee -a "${logs}"/log.txt
 echo -e "Memory: "$mem"G" | tee -a "${logs}"/log.txt
 
 #pipeline version
-echo -e "\nphage_diversity_HT.sh version 0.1.0\n" | tee -a "${logs}"/log.txt  # $0
+echo -e "\nphage_diversity_HT.sh version "${version}"\n" | tee -a "${logs}"/log.txt  # $0
 
 #check if depenencies are installed
 #if so, log version
@@ -309,110 +311,24 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 ###############
 
 
-function phasterSubmit()
+# Get phaster results
+python3 ~/scripts/checkPhasterServer.py --submit --check \
+    -i "${phaster}"/assemblies \
+    -o "$phaster"
+
+function extract_fasta()
 {
-    sample=$(basename "$1" | cut -d '_' -f 1)
+    sample=$(cut -d '_' -f 1 <<< $(basename "$1"))
 
-    wget --post-file="$1" \
-        http://phaster.ca/phaster_api?contigs=1 \
-        -O "${phaster}"/"${sample}"_query.json \
-        -o "${phaster}"/"${sample}"_wget.log
+    #Only get the fasta file out of the zip
+    unzip -p \
+        -j "${phaster}"/"${sample}"_phaster.zip \
+        "phage_regions.fna" \
+        > "${phaster}"/"${sample}"_phages.fasta
+
+    #Add sample name and entry number to fasta header
+    sed -i "s/^>/>"${sample}"_/" "${phaster}"/"${sample}"_phages.fasta
 }
-
-# Submit samples to PHASTER
-total=$(find "$assembly" -type f -name "*_assembly_trimmed*.fasta" | wc -l)
-counter=0
-for i in $(find "$assembly" -type f -name "*_assembly_trimmed*.fasta"); do
-    let counter=counter+1
-    echo -ne "Progress: "${counter}"/"${total}"\r"
-
-    phasterSubmit "$i"
-done
-
-function phasterResults()
-{
-    name=$(basename "$1")
-    sample=$(cut -d '_' -f 1 <<< "$name")
-
-    #Retrieve job ID from json file
-    # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
-    jobID=$(cat "${phaster}"/"${sample}"_query.json | cut -d ',' -f 1 | cut -d ":" -f 2 | tr -d '"')
-    # echo ""${sample}": "$jobID""  # debug
-
-    #Check if all submission were successful
-    while [ -z "$jobID" ]; do  # if no jobID (unsuccessful submission)
-        phasterSubmit "$1"  # resubmit the sample
-        jobID=$(cat "${phaster}"/"${sample}"_query.json | cut -d ',' -f 1 | cut -d ":" -f 2 | tr -d '"')
-    done
-
-    #get status
-    wget http://phaster.ca/phaster_api?acc="$jobID" -O "${phaster}"/"${sample}"_status.json
-    status=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 2 | cut -d ":" -f 2 | tr -d '"')
-
-    # echo "PHASTER analysis of "$sample" is "$status""
-
-    #check if PHASTER job is finished running
-    while [ "$status" != "Complete" ]; do
-        waitTime="30s" # sleep 
-
-        #check status every X time
-        echo "Job status of "$sample" is "$status". Checking status back in "$waitTime"." 
-        sleep "$waitTime"
-
-        #get status
-        wget http://phaster.ca/phaster_api?acc="$jobID" -O "${phaster}"/"${sample}"_status.json
-
-        #check job status
-        status=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 2 | cut -d ":" -f 2 | tr -d '"')
-    done
-
-    echo "PHASTER analysis of "$sample" is "$status""
-
-    #get the PHASTER output file
-    phasterZip=$(cat "${phaster}"/"${sample}"_status.json | cut -d ',' -f 4 | cut -d ":" -f 2 | tr -d '"')
-
-    # Check if was already downloaded
-    if [ ! -s "${phaster}"/"${sample}"_phaster.zip ]; then
-        wget "$phasterZip" -O "${phaster}"/"${sample}"_phaster.zip
-
-        #Only get the fasta file out of the zip
-        unzip -p \
-            -j "${phaster}"/"${sample}"_phaster.zip \
-            "phage_regions.fna" \
-            > "${phaster}"/"${sample}"_phages.fasta
-
-        #Add sample name and entry number to fasta header
-        sed -i "s/^>/>"${sample}"_/" "${phaster}"/"${sample}"_phages.fasta
-    fi
-}
-
-# #make function available to parallel
-# export -f phasterResults  # -f is to export functions
-
-# Parallel downlaoding results in an overload of the CPUs and no more download afer ~123 samples.
-# find "$assembly" -type f -name "*_assembly.fasta" \
-#     | parallel  --bar \
-#                 --delay 0.3 \
-#                 --env phasterResults \
-#                 --env phaster \
-#                 --jobs "$cpu" \
-#                 'phasterResults {}'
-
-
-total=$(find "$assembly" -type f -name "*_assembly.fasta" | wc -l)
-counter=0
-for i in $(find "$assembly" -type f -name "*_assembly.fasta"); do
-    let counter=counter+1
-    echo "Progress: "${counter}"/"${total}""
-
-    name=$(basename "$i")
-    sample=$(cut -d '_' -f 1 <<< "$name")
-
-    if [ ! -s "${phaster}"/"${sample}"_phaster.zip ]; then
-        phasterResults "$i"
-    fi
-done
-
 
 
 #######################
@@ -482,7 +398,7 @@ blastx \
     -db "/media/6tb_raid10/db/blast/prophages/prophage_virus.db" \
     -out "${phaster}"/clusterID.blastx \
     -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
-    -num_threads $(nproc) \
+    -num_threads "$cpu" \
     -max_target_seqs 1
 
 #Add header to blast output
@@ -499,16 +415,28 @@ mv "${phaster}"/tmp.txt "${phaster}"/clusterID.blastx
 #           #
 #############
 
+# Create biom v1 (json) file
+biom convert \
+    -i "${phaster}"/phages_clustered.tsv \
+    -o "${qiime}"/phages_clustered.biom \
+    --table-type="OTU table" \
+    --to-json
 
 #activate python virtual environment for QIIME
 source activate qiime1
 
-#Create biom fole from OTU table
-make_otu_table.py \
-    -i "${phaster}"/phages_clustered.tsv \
-    -o "${qiime}"/phages_clustered.biom
+#Beta Diversity (non-phylogenetic)
+beta_diversity.py \
+    -i "${qiime}"/phages_clustered.biom \
+    -m euclidean \
+    -o "${qiime}"/beta_div_non-phylo/
 
+#Beta Diversity (phylogenetic)
+beta_diversity.py \
+    -i "${qiime}"/phages_clustered.biom \
+    -m weighted_unifrac \
+    -o "${qiime}"/beta_div/ \
+    -t "${qiime}"/phages_clustered.tree
 
 #Deactivate the python virtual environment
 source deactivate
-
