@@ -431,12 +431,10 @@ beta_diversity.py \
     -m euclidean \
     -o "${qiime}"/beta_div_non-phylo/
 
-#Beta Diversity (phylogenetic)
-beta_diversity.py \
-    -i "${qiime}"/phages_clustered.biom \
-    -m weighted_unifrac \
-    -o "${qiime}"/beta_div/ \
-    -t "${qiime}"/phages_clustered.tree
+#UPGM tree from distance matrix from beta-diversity
+upgma_cluster.py \
+    -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered.txt \
+    -o "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered.tree
 
 #Deactivate the python virtual environment
 source deactivate
