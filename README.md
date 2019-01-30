@@ -23,6 +23,7 @@ Prophage typing tool from genome sequences. Main steps are:
 * Biom
 
 ## Usage
+
 It is recommended to use the "phage_diversity_HT.sh" script instead of "phage_diversity.sh", where the "HT" stands for "High Throughput". The "HT" version do all the read pre-processing and assembling in a single fonction, and the temporary files are deleted when no longer needed, which allow to process a high number of samples with limited hard drive space. The trade off is that version has less QC included. The "HT" version is also the most up-to-date one.
 
-In its current implementation, it is better to run the script by executing sections at the time, i.e. copy pasting from script to terminal. 
+In its current implementation, it is better to run the script by executing sections at the time, i.e. copy pasting from script to terminal. Before running script, you must fill/update the "Uder Defined" section at the beging.
