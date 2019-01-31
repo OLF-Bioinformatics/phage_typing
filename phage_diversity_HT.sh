@@ -1,5 +1,27 @@
 #!/bin/bash
 
+###################################
+#                                 #
+#    Prophage Sequence Typing     #
+#                                 #
+###################################
+
+
+author='duceppemo'
+version='0.1'
+
+
+##############
+#            #
+#    Note    #
+#            #
+##############
+
+
+# The pipleline will take as sample name everything that is before the first "_"
+# in the file name. Thus, it requires that the "_" is present in your file name,
+# which is usually the case with Illumina reads.
+
 
 ######################
 #                    #
@@ -8,19 +30,22 @@
 ######################
 
 
-#Analysis folder
-baseDir=""${HOME}"/analyses/salmonella_walid_extra3"
+# Folder where the PST was cloned from GitHub
+export pst_path=""${HOME}"/prog/phage_typing"
 
-#reads
-reads="/media/6tb_raid10/data/salmonella_walid_extra3"
+# Analysis folder
+baseDir=""${HOME}"/analyses/my_analysis"
 
-#program location
-export prog=""${HOME}"/prog"
+# Folder where all raw Illumina paired-end reads are located
+# The pipeline will look for ".fastq.gz" files
+reads="/media/30tb_raid10/data/my_data"
 
+# Phage blast database
+phage_db="/media/30tb_raid10/db/blast/prophages/viruses_Dec_2018.fasta"
 
-#Maximum number of cores used per sample for parallel processing
+# Maximum number of cores used per sample for parallel processing
 #A highier value reduces the memory footprint.
-export maxProc=3
+export maxProc=8
 
 #k-mer size for SPAdes assembler (must be odd number(s))
 #Should be smaller that minimum trimmed read length
@@ -34,7 +59,7 @@ export kmer="21,33,55,77,99,127"
 ######################
 
 
-#computer performance
+# Computer performance
 export cpu=$(nproc) #total number of cores
 export mem=$(($(grep MemTotal /proc/meminfo | awk '{print $2}')*85/100000000)) #85% of total memory in GB
 export memJava="-Xmx"$mem"g"
@@ -48,7 +73,7 @@ memCdHit=$((mem*1000))
 #######################
 
 
-#Folder structure
+# Folder structure
 fastq=""${baseDir}"/fastq"
 export logs=""${baseDir}"/logs"
 export trimmed=""${baseDir}"/trimmed"
@@ -57,7 +82,7 @@ export assembly=""${baseDir}"/assembly"
 export phaster=""${baseDir}"/phaster"
 qiime=""${baseDir}"/qiime"
 
-#create folders if do not exist
+# Create folders if do not exist
 # "||" if test is false
 # "&&" if test is true
 [ -d "$baseDir" ] || mkdir -p "$baseDir"
@@ -76,8 +101,6 @@ qiime=""${baseDir}"/qiime"
 #                     #
 #######################
 
-
-version='0.2'
 
 #Date
 echo -e "$(date)\n" | tee "${logs}"/log.txt
@@ -99,7 +122,31 @@ else
     exit 1
 fi
 
-#BBDuk
+# GNU parallel
+if hash parallel 2>/dev/null; then 
+    parallel --version | head -n 1 | tee -a "${logs}"/log.txt
+else
+    echo >&2 "GNU parallel was not found. Aborting." | tee -a "${logs}"/log.txt
+    exit 1
+fi
+
+# Python3
+if hash python3 &>/dev/null; then
+    python3 --version | tee -a "${logs}"/log.txt
+else
+    echo >&2 "python3 was not found. Aborting." | tee -a "${logs}"/log.txt
+    exit 1
+fi
+
+# Pigz
+if hash pigz 2>/dev/null; then 
+    pigz --version | tee -a "${logs}"/log.txt
+else
+    echo >&2 "pigz was not found. Aborting." | tee -a "${logs}"/log.txt
+    exit 1
+fi
+
+# BBDuk
 if hash bbduk.sh 2>/dev/null; then 
     bbduk.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
 else
@@ -107,7 +154,7 @@ else
     exit 1
 fi
 
-#BBmap
+# BBmap
 if hash bbmerge.sh 2>/dev/null; then 
     bbmerge.sh -v 2>&1 1>/dev/null | grep "version" | tee -a "${logs}"/log.txt
 else
@@ -115,7 +162,7 @@ else
     exit 1
 fi
 
-#SPAdes
+# SPAdes
 if hash spades.py 2>/dev/null; then
     spades.py -v 2>&1 1>/dev/null | tee -a "${logs}"/log.txt
 else
@@ -123,11 +170,19 @@ else
     exit 1
 fi
 
-#CD-HIT-EST
+# CD-HIT-EST
 if hash cd-hit-est 2>/dev/null; then
     cd-hit-est -h | head -n 1 | tr -d "=" | sed 's/^[ \t]*//;s/[ \t]*$//' | tee -a "${logs}"/log.txt
 else
     echo >&2 "cd-hit-est was not found. Aborting." | tee -a "${logs}"/log.txt
+    exit 1
+fi
+
+# Biom
+if hash biom 2>/dev/null; then
+    biom --version | tee -a "${logs}"/log.txt
+else
+    echo >&2 "biom was not found. Aborting." | tee -a "${logs}"/log.txt
     exit 1
 fi
 
@@ -139,9 +194,11 @@ fi
 ########################
 
 
-#populate read folder with symbolic links pointing to paired-end fastq files
+# Populate fastq folder with symbolic links pointing to paired-end fastq files
 find -L "$reads" -type f -name "*.fastq.gz" \
-    | parallel --bar "ln -s {} "${fastq}"/{/}"  # {/} means basename in parallel -> https://www.gnu.org/software/parallel/man.html
+    | parallel --bar "ln -s {} "${fastq}"/{/}"
+    # {/} means basename using GNU parallel synthax 
+    # https://www.gnu.org/software/parallel/man.html
 
 
 ########################################
@@ -153,7 +210,7 @@ find -L "$reads" -type f -name "*.fastq.gz" \
 
 function TrimMergeAssemble()
 {
-    #trim
+    # Trim
     r1="$1"
     r2=$(echo "$r1" | sed 's/_R1/_R2/')   # 2014-SEQ-0729_S5_L001_R1_001.fastq.gz
     sample=$(basename "$r1" | cut -d '_' -f 1) 
@@ -162,7 +219,7 @@ function TrimMergeAssemble()
         threads=$((cpu/maxProc)) \
         in1="$r1" \
         in2="$r2" \
-        ref="${prog}"/bbmap/resources/nextera.fa.gz \
+        ref=nextera.fa.gz \
         ktrim=r k=23 mink=11 hdist=1 tbo tpe \
         qtrim=lr trimq=10 \
         minlen=64 \
@@ -173,7 +230,7 @@ function TrimMergeAssemble()
         2> >(tee "${logs}"/trimming/"${sample}".txt)
 
 
-    #merge
+    # Merge
     t1="${trimmed}"/"${sample}"_Trimmed_1P.fastq.gz
     t2=$(echo "$t1" | sed 's/_1P/_2P/')
 
@@ -188,19 +245,16 @@ function TrimMergeAssemble()
         unpigz=t \
         2> >(tee -a "${logs}"/merging/"${sample}".txt)
 
-    #Free up some disk space; remove trimmed reads
-    rm  "${trimmed}"/"${sample}"*
+    # Free up some disk space; remove trimmed reads
+    rm "${trimmed}"/"${sample}"*
 
 
-    #assemble
-    #create a separate output directory for each sample
+    # Assemble
+    # Create a separate output directory for each sample
     spadesOut=""${assembly}"/"${sample}""
     [ -d "$spadesOut" ] || mkdir -p "$spadesOut"
 
-    #Splitting the assembly in two separate processes decreases the total run time of assembly
-    #error correction only
     spades.py \
-        --only-error-correction \
         -t $((cpu/maxProc)) \
         -m $((mem/maxProc)) \
         -k "$kmer" \
@@ -208,49 +262,31 @@ function TrimMergeAssemble()
         --s1 "${merged}"/"${sample}"_merged.fastq.gz \
         --pe1-1 "${merged}"/"${sample}"_unmerged_1P.fastq.gz \
         --pe1-2 "${merged}"/"${sample}"_unmerged_2P.fastq.gz \
-        -o "${spadesOut}"/ec &> /dev/null
-
-    #corrected reads
-    cor_m=$(find "${spadesOut}"/ec/corrected -type f -name "*_merged*cor.fastq.gz")
-    cor_1p=$(find "${spadesOut}"/ec/corrected -type f -name "*_unmerged_1P*cor.fastq.gz")
-    cor_2p=$(find "${spadesOut}"/ec/corrected -type f -name "*_unmerged_2P*cor.fastq.gz")
-
-    #Assembly only
-    spades.py \
-        --only-assembler \
-        -t $((cpu/maxProc)) \
-        -m $((mem/maxProc)) \
-        -k "$kmer" \
-        --careful \
-        --s1 "$cor_m" \
-        --pe1-1 "$cor_1p" \
-        --pe1-2 "$cor_2p" \
         -o "$spadesOut" &> /dev/null
 
-    #remane scaffolds.fasta
+    # Remane scaffolds.fasta
     mv "${spadesOut}"/scaffolds.fasta "${spadesOut}"/"${sample}"_assembly.fasta
 
-    #do some cleanup after assembly (remove temporary files)
+    # Do some cleanup after assembly (remove temporary files)
     find "$spadesOut" | awk 'NR > 1' | grep -v "${spadesOut}"/"${sample}"_assembly.fasta | xargs rm -rf
 
-    #Free up some disk space; remove merged reads
+    # Free up some disk space; remove merged reads
     rm  "${merged}"/"${sample}"*
 }
 
-#make function available to parallel
+# Make function available to parallel
 export -f TrimMergeAssemble  # -f is to export functions
 
 #Create report output directory
 [ -d "${logs}"/trimming ] || mkdir -p "${logs}"/trimming
 [ -d "${logs}"/merging ] || mkdir -p "${logs}"/merging
 
-#run trimming on multiple samples in parallel
+# Run trimming on multiple samples in parallel
 find -L "$fastq" -type f -name "*.fastq.gz" -name "*_R1*" \
     | parallel  --env TrimMergeAssemble \
                 --env cpu \
                 --env maxProc \
                 --env memJava \
-                --env prog \
                 --env trimmed \
                 --env merged \
                 --env assembly \
@@ -268,39 +304,43 @@ find -L "$fastq" -type f -name "*.fastq.gz" -name "*_R1*" \
 #########################
 
 
+[ -d "${phaster}"/assemblies ] || mkdir -p "${phaster}"/assemblies
+
 function assemblyTrimm()
 {
-    name=$(basename "$1")
-    sample=$(cut -d '_' -f 1 <<< "$name")
+    sample=$(cut -d '_' -f 1 <<< $(basename "$1"))
 
     # http://phaster.ca/instructions
-    if [ $(cat "$1" | grep -Ec "^>") -gt 1 ]; then  # if more than one contig
-        #remove contigs smaller than 2000 bp from assembly
-        perl "${prog}"/phage_typing/removesmallscontigs.pl \
+    if [ $(cat "$1" | grep -Ec "^>") -gt 1 ]; then  # If more than one contig
+        # Remove contigs smaller than 2000 bp from assembly
+        perl "${pst_path}"/removesmallscontigs.pl \
             2000 \
             "$1" \
-            > "${1%.fasta}"_trimmed2000.fasta
-    elif [ $(cat "$1" | grep -Ec "^>") -eq 1 ]; then  # if only one contig
-        #remove contigs smaller than 2000 bp from assembly
-        perl "${prog}"/phage_typing/removesmallscontigs.pl \
-            1500 \
-            "$1" \
-            > "${1%.fasta}"_trimmed1500.fasta
+            > "${phaster}"/assemblies/"${sample}"_trimmed2000.fasta
+    elif [ $(cat "$1" | grep -Ec "^>") -eq 1 ]; then  # If only one contig
+        # Check if contig is at least 1500 bp
+        seqlen=$(cat "$1" | awk '!/^>/ {l+=length($0)} END {print l}')
+        if [ "$seqlen" -lt 1500 ]; then
+            echo "Assembly is one contig, but smaller than 1500bp! Skipping."
+        else
+            ln -s "$1" "${phaster}"/assemblies/"${sample}".fasta
+        fi
     else
         echo "No assembly for "$sample""  # Should not get here!
         exit 1
     fi
-
-    #replace old file
-    # mv "${1}".tmp "${1}"
 }
 
-#make function available to parallel
+# Make function available to parallel
 export -f assemblyTrimm  # -f is to export functions
 
-#run trimming on multiple assemblies in parallel
+# Run trimming on multiple assemblies in parallel
 find "$assembly" -type f -name "*_assembly.fasta" \
-    | parallel --env assemblyTrimm --env prog 'assemblyTrimm {}'
+    | parallel  --bar \
+                --env assemblyTrimm \
+                --env phaster \
+                --env pst_path \
+                'assemblyTrimm {}'
 
 
 
@@ -311,8 +351,32 @@ find "$assembly" -type f -name "*_assembly.fasta" \
 ###############
 
 
-# Get phaster results
-python3 ~/scripts/checkPhasterServer.py --submit --check \
+# It seems that submitting the assemlies with wget is faster than using python
+function phasterSubmit ()
+{
+    sample=$(basename "$1" | cut -d '_' -f 1)
+
+    # {"job_id":"ZZ_7aed0446a6","status":"You're next!..."}
+    wget --post-file="$i" \
+        http://phaster.ca/phaster_api?contigs=1 \
+        -O "${phaster}"/"${sample}".json \
+        -o "${phaster}"/"${sample}"_wget.log
+}
+
+# Submit to phaster sequencially
+counter=0
+total=$(find "${phaster}"/assemblies -type f -name "*.fasta" | wc -l)
+for i in $(find "${phaster}"/assemblies -type f -name "*.fasta"); do
+    let counter+=1
+    sample=$(cut -d '_' -f 1 <<< $(basename "$1"))
+    echo -ne "Submitting "${sample}" ("${counter}"/"${total}")"\\r
+    phasterSubmit "$i"
+done
+
+
+# Submit assemblies to PHASTER server and fetch results when ready
+python3 "${pst_path}"/checkPhasterServer.py \
+    --check \
     -i "${phaster}"/assemblies \
     -o "$phaster"
 
@@ -320,15 +384,23 @@ function extract_fasta()
 {
     sample=$(cut -d '_' -f 1 <<< $(basename "$1"))
 
-    #Only get the fasta file out of the zip
+    # Only get the fasta file out of the zip
     unzip -p \
         -j "${phaster}"/"${sample}"_phaster.zip \
         "phage_regions.fna" \
         > "${phaster}"/"${sample}"_phages.fasta
 
-    #Add sample name and entry number to fasta header
+    # Add sample name and entry number to fasta header
     sed -i "s/^>/>"${sample}"_/" "${phaster}"/"${sample}"_phages.fasta
 }
+
+export -f extract_fasta
+
+find "$phaster" -type f -name "*_phaster.zip" |
+parallel    --bar \
+            --env extract_fasta \
+            --env phaster \
+            'extract_fasta {}'
 
 
 #######################
@@ -344,6 +416,13 @@ done
 
 
 # http://weizhongli-lab.org/lab-wiki/doku.php?id=cd-hit-user-guide
+# -c  sequence identity threshold, default 0.9
+#     this is the default cd-hit's "global sequence identity" calculated as:
+#     number of identical amino acids in alignment
+#     divided by the full length of the shorter sequence
+# -s  length difference cutoff, default 0.0
+#     if set to 0.9, the shorter sequences need to be
+#     at least 90% length of the representative of the cluster
 
 # For DNAs:
 
@@ -354,15 +433,15 @@ done
     # Word size 5 is for thresholds 0.80 ~ 0.85
     # Word size 4 is for thresholds 0.75 ~ 0.8
 
-#cluster similar phages together with CD-HIT-EST
+# Cluster similar phages together with CD-HIT-EST
 cd-hit-est \
     -i "${phaster}"/phages_all.fasta \
-    -o "${phaster}"/phages_clustered.fasta \
-    -c 0.9 \
-    -s 0.9 \
-    -T $(nproc) \
+    -o "${phaster}"/phages_clustered_c99_s90.fasta \
+    -c 0.99 \
+    -s 0.90 \
+    -T "$cpu" \
     -M "$memCdHit" \
-    -n 8 \
+    -n 10 \
     -d 0
 
 
@@ -377,12 +456,12 @@ cd-hit-est \
 sampleList=($(ls "${phaster}"/*_phages.fasta | sed -e 's/_phages.fasta//' -e "s%$phaster/%%g"))
 echo "${sampleList[@]}" | tr " " "\n" > "${phaster}"/sampleList.txt
 
-#Convert CD-HIT-EST ".clstr" output file to OTU table
+# Convert CD-HIT-EST ".clstr" output file to OTU table
 # Usage: perl cdHitClstr2table.pl -s sampleList -c cd-hit.clstr -o outputTable.tsv
-perl "${prog}"/phage_typing/cdHitClstr2table.pl \
+perl "${pst_path}"/cdHitClstr2table.pl \
     -s "${phaster}"/sampleList.txt \
-    -i "${phaster}"/phages_clustered.fasta.clstr \
-    -o "${phaster}"/phages_clustered.tsv
+    -i "${phaster}"/phages_clustered_c99_s90.fasta.clstr \
+    -o "${phaster}"/phages_clustered_c99_s90.tsv
 
 
 #############
@@ -392,21 +471,35 @@ perl "${prog}"/phage_typing/cdHitClstr2table.pl \
 #############
 
 
-#Identify the phage of the repesentative sequences from CD-HIT-EST
-blastx \
-    -query "${phaster}"/phages_clustered.fasta \
-    -db "/media/6tb_raid10/db/blast/prophages/prophage_virus.db" \
-    -out "${phaster}"/clusterID.blastx \
+# Identify the phage of the repesentative sequences from CD-HIT-EST
+# ftp://ftp.ncbi.nlm.nih.gov/genomes/Viruses/all.fna.tar.gz
+blastn \
+    -query "${phaster}"/phages_clustered_c99_s90.fasta \
+    -db "$phage_db" \
+    -out "${phaster}"/clusterID_c99_s90.blastn.tsv \
     -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
     -num_threads "$cpu" \
-    -max_target_seqs 1
+    -evalue "1e-10" \
+    -culling_limit 5
 
-#Add header to blast output
+# Best hit only
+echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
+    >  "${phaster}"/clusterID_c99_s90.blastn.tsv.tmp
+
+cat  "${phaster}"/clusterID_c99_s90.blastn.tsv \
+    | sort -t $'\t' -k1,1 -k3,3r \
+    | sort -t $'\t' -uk1,1 \
+    >>  "${phaster}"/clusterID_c99_s90.blastn.tsv.tmp
+
+mv  "${phaster}"/clusterID_c99_s90.blastn.tsv.tmp \
+     "${phaster}"/clusterID_c99_s90.bestHit.blastn.tsv
+
+# Add header to blast output
 echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
     > "${phaster}"/tmp.txt
-cat "${phaster}"/clusterID.blastx \
+cat "${phaster}"/clusterID_c99_s90.blastn.tsv \
     >> "${phaster}"/tmp.txt
-mv "${phaster}"/tmp.txt "${phaster}"/clusterID.blastx
+mv "${phaster}"/tmp.txt "${phaster}"/clusterID_c99_s90.blastn.tsv
 
 
 #############
@@ -415,26 +508,206 @@ mv "${phaster}"/tmp.txt "${phaster}"/clusterID.blastx
 #           #
 #############
 
+
+# Convert to presence/absence matrix
+cat "${phaster}"/phages_clustered_c99_s90.tsv \
+    | head -n 1 \
+    > "${phaster}"/phages_clustered_c99_s90_PA.tsv
+
+cat "${phaster}"/phages_clustered_c99_s90.tsv \
+    | sed -e '1d' \
+    | awk -F $'\t' 'BEGIN {OFS = FS} {
+    for(i=2; i <= NF; i++) {
+        if($i != 0){
+            $i = 1
+        }
+    }
+    {print $0}
+}' >> "${phaster}"/phages_clustered_c99_s90_PA.tsv
+
 # Create biom v1 (json) file
 biom convert \
-    -i "${phaster}"/phages_clustered.tsv \
-    -o "${qiime}"/phages_clustered.biom \
+    -i "${phaster}"/phages_clustered_c99_s90_PA.tsv \
+    -o "${qiime}"/phages_clustered_c99_s90.biom \
     --table-type="OTU table" \
     --to-json
 
-#activate python virtual environment for QIIME
+# #Align sequences
+# mafft \
+#     --thread $(nproc) \
+#     --reorder \
+#     "${phaster}"/phages_clustered.fasta \
+#     > "${qiime}"/phages_clustered.aln
+
+# #Make tree
+# cd "$qiime"
+# raxmlHPC-PTHREADS-AVX2 \
+#     -s "${qiime}"/phages_clustered.aln \
+#     -n phages_clustered.tree \
+#     -m "GTRCAT" \
+#     -p "$RANDOM" \
+#     -T "$cpu"
+
+
+# Activate python virtual environment for QIIME
 source activate qiime1
 
-#Beta Diversity (non-phylogenetic)
+# From Walid
+# alpha_diversity.py \
+#     -i "${qiime}"/phages_clustered_c99_s90.biom \
+#     -m chao1,observed_otus \
+#     -o "${qiime}"/alpha_div_non-phylo.tsv
+# filter_otus_from_otu_table.py \
+#     -i "${qiime}"/phages_clustered_c99_s90.biom \
+#     -s 4 \
+#     -o "${qiime}"/phages_clustered_c99_s90_filtered.biom
+# # Need to create a mapping (metadata) file
+# # http://qiime.org/documentation/file_formats.html
+# #SampleID BarcodeSequence LinkerPrimerSequence Treatment DOB Description
+# #PC.354 AGCACGAGCCTA YATGCTGCCTCCCGTAGGAGT Control 20061218 Control_mouse__I.D._354
+# beta_diversity_through_plots.py \
+#     -i "${qiime}"/phages_clustered_c99_s90_filtered.biom \
+#     -m "${qiime}"/metadata.tsv \
+#     -o "${qiime}"/beta_div_non-phylo
+# # upgma_cluster.py \
+#     -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c99_s90.txt \
+#     -o "${qiime}"/Betadiversity-bray_curtis_upgma.tree
+# # compare_categories.py \
+#     --method anosim \
+#     -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c99_s90.txt \
+#     -o "${qiime}"/Betadiversity-bray_curtis_anosim.txt \
+#     -m "${qiime}"/metadata.tsv \
+#     -c Outbreak
+# # supervised_learning.py \
+#     -v \
+#     -i "${qiime}"/phages_clustered_c99_s90.biom \
+#     -o "${qiime}"/supervised-learning \
+#     -m "${qiime}"/metadata.tsv \
+#     -c Outbreak
+
+# Beta Diversity (non-phylogenetic)
 beta_diversity.py \
-    -i "${qiime}"/phages_clustered.biom \
+    -i "${qiime}"/phages_clustered_c99_s90.biom \
     -m euclidean \
     -o "${qiime}"/beta_div_non-phylo/
 
-#UPGM tree from distance matrix from beta-diversity
+# UPGM tree from distance matrix from beta-diversity
 upgma_cluster.py \
-    -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered.txt \
-    -o "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered.tree
+    -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c99_s90.txt \
+    -o "${qiime}"/euclidean_phages_clustered_c99_s90.tree
+
+# N-J tree from distance matrix from beta-diversity
+neighbor_joining.py \
+    -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c99_s90.txt \
+    -o "${qiime}"/nj_euclidean_phages_clustered_c99_s90.tree
+
+# #Beta Diversity (phylogenetic)
+# beta_diversity.py \
+#     -i "${qiime}"/phages_clustered.biom \
+#     -m weighted_unifrac \
+#     -o "${qiime}"/beta_div/ \
+#     -t "${qiime}"/phages_clustered.tree
 
 #Deactivate the python virtual environment
 source deactivate
+
+
+:<<BLOCk_COMMENT
+#QIIME 2
+source activate qiime2-2017.10
+
+#import OTU-table
+qiime tools import \
+    --input-path "${qiime}"/phages_clustered_c99_s90.biom \
+    --type 'FeatureTable[Frequency]' \
+    --input-format 'BIOMV100Format' \
+    --output-path "${qiime}"/phage_table.qza
+
+qiime feature-table summarize \
+    --i-table "${qiime}"/phage_table.qza \
+    --o-visualization "${qiime}"/phage_table.qzv
+
+# Run non-phylo beta diversity
+qiime diversity beta \
+    --p-n-jobs -1 \
+    --i-table "${qiime}"/phage_table.qza \
+    --p-metric "euclidean" \
+    --o-distance-matrix "${qiime}"/euclidean_distance_matrix.qza
+
+#export tree
+qiime tools export
+
+
+# #import unaligned sequence data (representative sequences)
+# qiime tools import \
+#     --input-path "${phaster}"/phages_clustered.fasta \
+#     --output-path "${qiime}"/phage_sequences.qza \
+#     --type 'FeatureData[Sequence]'
+
+# #Create alignment
+# qiime alignment mafft \
+#     --p-n-threads -1 \
+#     --i-sequences "${qiime}"/phage_sequences.qza \
+#     --o-alignment "${qiime}"/phage_sequences_aligned.qza
+
+# #mask higly variable positions
+# qiime alignment mask \
+#     --i-alignment "${qiime}"/phage_sequences_aligned.qza \
+#     --o-masked-alignment "${qiime}"/phage_sequences_aligned_masked.qza
+
+# #Make tree
+# qiime phylogeny fasttree \
+#     --p-n-threads -1 \
+#     --i-alignment "${qiime}"/phage_sequences_aligned_masked.qza \
+#     --o-tree "${qiime}"/phage_unrooted-tree.qza
+
+# #root tree at midpoint
+# qiime phylogeny midpoint-root \
+#     --i-tree "${qiime}"/phage_unrooted-tree.qza \
+#     --o-rooted-tree "${qiime}"/phage_rooted-tree.qza
+
+
+    # --output-dir "${qiime}"/beta_div
+
+# qiime diversity beta-phylogenetic \
+#     --p-n-jobs "$cpu" \
+#     --i-table "${qiime}"/phage_table.qza \
+#     --i-phylogeny "${qiime}"/phage_rooted-tree.qza \
+#     --p-metric "unweighted_unifrac" \
+#     --output-dir "${qiime}"/beta_div_phylo
+
+
+#Diversity analysis
+qiime diversity core-metrics-phylogenetic \
+    --p-n-jobs -1 \
+    --i-phylogeny "${qiime}"/phage_rooted-tree.qza \
+    --i-table "${qiime}"/phage_table.qza \
+    --p-sampling-depth 1109 \
+    --m-metadata-file sample-metadata.tsv \
+    --o-bray-curtis-distance-matrix \
+    --output-dir "${qiime}"/core-metrics-results
+
+
+
+
+
+
+
+
+#import tree
+qiime tools import \
+    --input-path "${qiime}"/phages_clustered.nwk \
+    --output-path "${qiime}"/phages_clustered.qza \
+    --type 'Phylogeny[Unrooted]'
+
+# Visual summary of imported data
+qiime feature-table summarize \
+    --i-table "${qiime}"/phage_table.qza \
+    --o-visualization "${qiime}"/phage_table.qzv \
+    --m-sample-metadata-file sample-metadata.tsv
+
+qiime feature-table tabulate-seqs \
+    --i-data "${qiime}"/phage_sequences.qza \
+    --o-visualization "${qiime}"/phage_sequences.qzv
+BLOCk_COMMENT
+
