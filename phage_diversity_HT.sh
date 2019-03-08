@@ -8,7 +8,7 @@
 
 
 author='duceppemo'
-version='0.1'
+version='0.1.1'
 
 
 ##############
@@ -50,6 +50,29 @@ export maxProc=8
 #k-mer size for SPAdes assembler (must be odd number(s))
 #Should be smaller that minimum trimmed read length
 export kmer="21,33,55,77,99,127"
+
+# Clustering settings
+seq_id=0.99  # -c
+len_cutoff=0.99  # -s
+word_size=11  # -n
+
+# http://weizhongli-lab.org/lab-wiki/doku.php?id=cd-hit-user-guide
+# -c  sequence identity threshold, default 0.9
+#     this is the default cd-hit's "global sequence identity" calculated as:
+#     number of identical amino acids in alignment
+#     divided by the full length of the shorter sequence
+# -s  length difference cutoff, default 0.0
+#     if set to 0.9, the shorter sequences need to be
+#     at least 90% length of the representative of the cluster
+
+# For DNAs:
+
+    # Word size 10-11 is for thresholds 0.95 ~ 1.0
+    # Word size 8,9 is for thresholds 0.90 ~ 0.95
+    # Word size 7 is for thresholds 0.88 ~ 0.9
+    # Word size 6 is for thresholds 0.85 ~ 0.88
+    # Word size 5 is for thresholds 0.80 ~ 0.85
+    # Word size 4 is for thresholds 0.75 ~ 0.8
 
 
 ######################
@@ -414,34 +437,15 @@ for i in $(find "$phaster" -type f -name "*_phages.fasta"); do
     cat "$i" >> "${phaster}"/phages_all.fasta
 done
 
-
-# http://weizhongli-lab.org/lab-wiki/doku.php?id=cd-hit-user-guide
-# -c  sequence identity threshold, default 0.9
-#     this is the default cd-hit's "global sequence identity" calculated as:
-#     number of identical amino acids in alignment
-#     divided by the full length of the shorter sequence
-# -s  length difference cutoff, default 0.0
-#     if set to 0.9, the shorter sequences need to be
-#     at least 90% length of the representative of the cluster
-
-# For DNAs:
-
-    # Word size 10-11 is for thresholds 0.95 ~ 1.0
-    # Word size 8,9 is for thresholds 0.90 ~ 0.95
-    # Word size 7 is for thresholds 0.88 ~ 0.9
-    # Word size 6 is for thresholds 0.85 ~ 0.88
-    # Word size 5 is for thresholds 0.80 ~ 0.85
-    # Word size 4 is for thresholds 0.75 ~ 0.8
-
 # Cluster similar phages together with CD-HIT-EST
 cd-hit-est \
     -i "${phaster}"/phages_all.fasta \
-    -o "${phaster}"/phages_clustered_c99_s90.fasta \
-    -c 0.99 \
-    -s 0.90 \
+    -o "${phaster}"/phages_clustered_c"${seq_id}"_s"${len_cutoff}".fasta \
+    -c "$seq_id" \
+    -s "$len_cutoff" \
+    -n "$word_size" \
     -T "$cpu" \
     -M "$memCdHit" \
-    -n 10 \
     -d 0
 
 
@@ -460,8 +464,8 @@ echo "${sampleList[@]}" | tr " " "\n" > "${phaster}"/sampleList.txt
 # Usage: perl cdHitClstr2table.pl -s sampleList -c cd-hit.clstr -o outputTable.tsv
 perl "${pst_path}"/cdHitClstr2table.pl \
     -s "${phaster}"/sampleList.txt \
-    -i "${phaster}"/phages_clustered_c99_s90.fasta.clstr \
-    -o "${phaster}"/phages_clustered_c99_s90.tsv
+    -i "${phaster}"/phages_clustered_c"${seq_id}"_s"${len_cutoff}".fasta.clstr \
+    -o "${phaster}"/phages_clustered_c"${seq_id}"_s"${len_cutoff}".tsv
 
 
 #############
@@ -483,23 +487,33 @@ blastn \
     -culling_limit 5
 
 # Best hit only
-echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
-    >  "${phaster}"/clusterID_c99_s90.blastn.tsv.tmp
+blastn \
+    -query "${phaster}"/phages_clustered_c"${seq_id}"_s"${len_cutoff}".fasta \
+    -db "$phage_db" \
+    -out "${phaster}"/clusterID_c"${seq_id}"_s"${len_cutoff}".blastn.tsv \
+    -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
+    -num_threads "$cpu" \
+    -evalue "1e-10" \
+    -culling_limit 5
 
-cat  "${phaster}"/clusterID_c99_s90.blastn.tsv \
+# Best hit only
+echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
+    >  "${phaster}"/clusterID_c"${seq_id}"_s"${len_cutoff}".blastn.tsv.tmp
+
+cat  "${phaster}"/clusterID_c"${seq_id}"_s"${len_cutoff}".blastn.tsv \
     | sort -t $'\t' -k1,1 -k3,3r \
     | sort -t $'\t' -uk1,1 \
-    >>  "${phaster}"/clusterID_c99_s90.blastn.tsv.tmp
+    >>  "${phaster}"/clusterID_c"${seq_id}"_s"${len_cutoff}".blastn.tsv.tmp
 
-mv  "${phaster}"/clusterID_c99_s90.blastn.tsv.tmp \
-     "${phaster}"/clusterID_c99_s90.bestHit.blastn.tsv
+mv  "${phaster}"/clusterID_c"${seq_id}"_s"${len_cutoff}".blastn.tsv.tmp \
+     "${phaster}"/clusterID_c"${seq_id}"_s"${len_cutoff}".bestHit.blastn.tsv
 
 # Add header to blast output
 echo -e "qseqid\tsseqid\tstitle\tpident\tlength\tmismatch\tgapopen\tqstart\tqend\tsstart\tsend\tevalue\tbitscore" \
     > "${phaster}"/tmp.txt
-cat "${phaster}"/clusterID_c99_s90.blastn.tsv \
+cat "${phaster}"/clusterID_c"${seq_id}"_s"${len_cutoff}".blastn.tsv \
     >> "${phaster}"/tmp.txt
-mv "${phaster}"/tmp.txt "${phaster}"/clusterID_c99_s90.blastn.tsv
+mv "${phaster}"/tmp.txt "${phaster}"/clusterID_c9"${seq_id}"_s"${len_cutoff}".blastn.tsv
 
 
 #############
@@ -509,205 +523,31 @@ mv "${phaster}"/tmp.txt "${phaster}"/clusterID_c99_s90.blastn.tsv
 #############
 
 
-# Convert to presence/absence matrix
-cat "${phaster}"/phages_clustered_c99_s90.tsv \
-    | head -n 1 \
-    > "${phaster}"/phages_clustered_c99_s90_PA.tsv
-
-cat "${phaster}"/phages_clustered_c99_s90.tsv \
-    | sed -e '1d' \
-    | awk -F $'\t' 'BEGIN {OFS = FS} {
-    for(i=2; i <= NF; i++) {
-        if($i != 0){
-            $i = 1
-        }
-    }
-    {print $0}
-}' >> "${phaster}"/phages_clustered_c99_s90_PA.tsv
-
 # Create biom v1 (json) file
 biom convert \
-    -i "${phaster}"/phages_clustered_c99_s90_PA.tsv \
-    -o "${qiime}"/phages_clustered_c99_s90.biom \
+    -i "${phaster}"/phages_clustered_c"${seq_id}"_s"${len_cutoff}".tsv \
+    -o "${qiime}"/phages_clustered_c"${seq_id}"_s"${len_cutoff}".biom \
     --table-type="OTU table" \
     --to-json
-
-# #Align sequences
-# mafft \
-#     --thread $(nproc) \
-#     --reorder \
-#     "${phaster}"/phages_clustered.fasta \
-#     > "${qiime}"/phages_clustered.aln
-
-# #Make tree
-# cd "$qiime"
-# raxmlHPC-PTHREADS-AVX2 \
-#     -s "${qiime}"/phages_clustered.aln \
-#     -n phages_clustered.tree \
-#     -m "GTRCAT" \
-#     -p "$RANDOM" \
-#     -T "$cpu"
-
 
 # Activate python virtual environment for QIIME
 source activate qiime1
 
-# From Walid
-# alpha_diversity.py \
-#     -i "${qiime}"/phages_clustered_c99_s90.biom \
-#     -m chao1,observed_otus \
-#     -o "${qiime}"/alpha_div_non-phylo.tsv
-# filter_otus_from_otu_table.py \
-#     -i "${qiime}"/phages_clustered_c99_s90.biom \
-#     -s 4 \
-#     -o "${qiime}"/phages_clustered_c99_s90_filtered.biom
-# # Need to create a mapping (metadata) file
-# # http://qiime.org/documentation/file_formats.html
-# #SampleID BarcodeSequence LinkerPrimerSequence Treatment DOB Description
-# #PC.354 AGCACGAGCCTA YATGCTGCCTCCCGTAGGAGT Control 20061218 Control_mouse__I.D._354
-# beta_diversity_through_plots.py \
-#     -i "${qiime}"/phages_clustered_c99_s90_filtered.biom \
-#     -m "${qiime}"/metadata.tsv \
-#     -o "${qiime}"/beta_div_non-phylo
-# # upgma_cluster.py \
-#     -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c99_s90.txt \
-#     -o "${qiime}"/Betadiversity-bray_curtis_upgma.tree
-# # compare_categories.py \
-#     --method anosim \
-#     -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c99_s90.txt \
-#     -o "${qiime}"/Betadiversity-bray_curtis_anosim.txt \
-#     -m "${qiime}"/metadata.tsv \
-#     -c Outbreak
-# # supervised_learning.py \
-#     -v \
-#     -i "${qiime}"/phages_clustered_c99_s90.biom \
-#     -o "${qiime}"/supervised-learning \
-#     -m "${qiime}"/metadata.tsv \
-#     -c Outbreak
-
 # Beta Diversity (non-phylogenetic)
 beta_diversity.py \
-    -i "${qiime}"/phages_clustered_c99_s90.biom \
+    -i "${qiime}"/phages_clustered_c"${seq_id}"_s"${len_cutoff}".biom \
     -m euclidean \
     -o "${qiime}"/beta_div_non-phylo/
 
 # UPGM tree from distance matrix from beta-diversity
 upgma_cluster.py \
-    -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c99_s90.txt \
-    -o "${qiime}"/euclidean_phages_clustered_c99_s90.tree
+    -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c"${seq_id}"_s"${len_cutoff}".txt \
+    -o "${qiime}"/euclidean_phages_clustered_c"${seq_id}"_s"${len_cutoff}".tree
 
 # N-J tree from distance matrix from beta-diversity
 neighbor_joining.py \
-    -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c99_s90.txt \
-    -o "${qiime}"/nj_euclidean_phages_clustered_c99_s90.tree
-
-# #Beta Diversity (phylogenetic)
-# beta_diversity.py \
-#     -i "${qiime}"/phages_clustered.biom \
-#     -m weighted_unifrac \
-#     -o "${qiime}"/beta_div/ \
-#     -t "${qiime}"/phages_clustered.tree
+    -i "${qiime}"/beta_div_non-phylo/euclidean_phages_clustered_c"${seq_id}"_s"${len_cutoff}".txt \
+    -o "${qiime}"/nj_euclidean_phages_clustered_c"${seq_id}"_s"${len_cutoff}".tree
 
 #Deactivate the python virtual environment
 source deactivate
-
-
-:<<BLOCk_COMMENT
-#QIIME 2
-source activate qiime2-2017.10
-
-#import OTU-table
-qiime tools import \
-    --input-path "${qiime}"/phages_clustered_c99_s90.biom \
-    --type 'FeatureTable[Frequency]' \
-    --input-format 'BIOMV100Format' \
-    --output-path "${qiime}"/phage_table.qza
-
-qiime feature-table summarize \
-    --i-table "${qiime}"/phage_table.qza \
-    --o-visualization "${qiime}"/phage_table.qzv
-
-# Run non-phylo beta diversity
-qiime diversity beta \
-    --p-n-jobs -1 \
-    --i-table "${qiime}"/phage_table.qza \
-    --p-metric "euclidean" \
-    --o-distance-matrix "${qiime}"/euclidean_distance_matrix.qza
-
-#export tree
-qiime tools export
-
-
-# #import unaligned sequence data (representative sequences)
-# qiime tools import \
-#     --input-path "${phaster}"/phages_clustered.fasta \
-#     --output-path "${qiime}"/phage_sequences.qza \
-#     --type 'FeatureData[Sequence]'
-
-# #Create alignment
-# qiime alignment mafft \
-#     --p-n-threads -1 \
-#     --i-sequences "${qiime}"/phage_sequences.qza \
-#     --o-alignment "${qiime}"/phage_sequences_aligned.qza
-
-# #mask higly variable positions
-# qiime alignment mask \
-#     --i-alignment "${qiime}"/phage_sequences_aligned.qza \
-#     --o-masked-alignment "${qiime}"/phage_sequences_aligned_masked.qza
-
-# #Make tree
-# qiime phylogeny fasttree \
-#     --p-n-threads -1 \
-#     --i-alignment "${qiime}"/phage_sequences_aligned_masked.qza \
-#     --o-tree "${qiime}"/phage_unrooted-tree.qza
-
-# #root tree at midpoint
-# qiime phylogeny midpoint-root \
-#     --i-tree "${qiime}"/phage_unrooted-tree.qza \
-#     --o-rooted-tree "${qiime}"/phage_rooted-tree.qza
-
-
-    # --output-dir "${qiime}"/beta_div
-
-# qiime diversity beta-phylogenetic \
-#     --p-n-jobs "$cpu" \
-#     --i-table "${qiime}"/phage_table.qza \
-#     --i-phylogeny "${qiime}"/phage_rooted-tree.qza \
-#     --p-metric "unweighted_unifrac" \
-#     --output-dir "${qiime}"/beta_div_phylo
-
-
-#Diversity analysis
-qiime diversity core-metrics-phylogenetic \
-    --p-n-jobs -1 \
-    --i-phylogeny "${qiime}"/phage_rooted-tree.qza \
-    --i-table "${qiime}"/phage_table.qza \
-    --p-sampling-depth 1109 \
-    --m-metadata-file sample-metadata.tsv \
-    --o-bray-curtis-distance-matrix \
-    --output-dir "${qiime}"/core-metrics-results
-
-
-
-
-
-
-
-
-#import tree
-qiime tools import \
-    --input-path "${qiime}"/phages_clustered.nwk \
-    --output-path "${qiime}"/phages_clustered.qza \
-    --type 'Phylogeny[Unrooted]'
-
-# Visual summary of imported data
-qiime feature-table summarize \
-    --i-table "${qiime}"/phage_table.qza \
-    --o-visualization "${qiime}"/phage_table.qzv \
-    --m-sample-metadata-file sample-metadata.tsv
-
-qiime feature-table tabulate-seqs \
-    --i-data "${qiime}"/phage_sequences.qza \
-    --o-visualization "${qiime}"/phage_sequences.qzv
-BLOCk_COMMENT
-
