@@ -10,7 +10,7 @@ import sys
 
 
 __author__ = 'duceppemo'
-__version__ = '0.2.2'
+__version__ = '0.2.2.1'
 
 
 class CheckPhasterServer(object):
@@ -45,7 +45,7 @@ class CheckPhasterServer(object):
             for fasta in self.fasta_list:
                 if self.check_fasta(fasta) is True:
                     counter += 1
-                    sample_name = os.path.basename(fasta).split("_")[0]
+                    sample_name = os.path.basename(fasta).split('.')[0].split('_')[0]
                     sys.stdout.write('\rSubmitting sample "' + sample_name
                                      + '" (' + str(counter) + '/' + str(total_samples) + ')')
                     self.submit_assembly(fasta)
