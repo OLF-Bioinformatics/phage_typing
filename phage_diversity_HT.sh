@@ -8,7 +8,7 @@
 
 
 author='duceppemo'
-version='0.1.1'
+version='0.1.2'
 
 
 ##############
@@ -438,6 +438,10 @@ for i in $(find "$phaster" -type f -name "*_phages.fasta"); do
 done
 
 # Cluster similar phages together with CD-HIT-EST
+seq_id=1  # -c
+len_cutoff=1 # -s
+word_size=11  # -n
+
 cd-hit-est \
     -i "${phaster}"/phages_all.fasta \
     -o "${phaster}"/phages_clustered_c"${seq_id}"_s"${len_cutoff}".fasta \
@@ -456,8 +460,12 @@ cd-hit-est \
 #######################
 
 
-# Create a list of samples
-sampleList=($(ls "${phaster}"/*_phages.fasta | sed -e 's/_phages.fasta//' -e "s%$phaster/%%g"))
+# Create a list of samples from the phages_all.fasta file
+# Better if tha just listing the *_phages.fasta files, in case multiple 
+# phages_all.fasta are merged
+sampleList=($(cat "${phaster}"/phages_all.fasta | \
+            grep -e "^>" | cut -d "_" -f 1 | \
+            tr -d ">" | sort | uniq))
 echo "${sampleList[@]}" | tr " " "\n" > "${phaster}"/sampleList.txt
 
 # Convert CD-HIT-EST ".clstr" output file to OTU table
@@ -477,16 +485,6 @@ perl "${pst_path}"/cdHitClstr2table.pl \
 
 # Identify the phage of the repesentative sequences from CD-HIT-EST
 # ftp://ftp.ncbi.nlm.nih.gov/genomes/Viruses/all.fna.tar.gz
-blastn \
-    -query "${phaster}"/phages_clustered_c99_s90.fasta \
-    -db "$phage_db" \
-    -out "${phaster}"/clusterID_c99_s90.blastn.tsv \
-    -outfmt '6 qseqid sseqid stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore' \
-    -num_threads "$cpu" \
-    -evalue "1e-10" \
-    -culling_limit 5
-
-# Best hit only
 blastn \
     -query "${phaster}"/phages_clustered_c"${seq_id}"_s"${len_cutoff}".fasta \
     -db "$phage_db" \
